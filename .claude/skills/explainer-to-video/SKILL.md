@@ -197,7 +197,10 @@ Fix in `video.js`, re-render the affected format.
 Also confirm the overlay landed: the explainer name holds top-center for the
 first 5 seconds and then clears. It is burned in the same pass as the captions
 — if captions are missing, so is it. There should be NO end card unless one
-was explicitly requested (see the `endCard` note above).
+was explicitly requested (see the `endCard` note above). Same rule for the
+channel's follow-button popup (`scripts/add-follow-overlay.mjs`, see
+`export-content`'s Step 5) — this fully unattended pipeline never applies it,
+since nobody is there to ask.
 
 ### Stage 9 — Thumbnails (long-form)
 

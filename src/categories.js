@@ -29,6 +29,11 @@ export const categories = {
     blurb: 'Buildings, bridges and the machines hidden inside them.',
     accent: '#c9a87c',
   },
+  earth: {
+    title: 'Earth & Weather',
+    blurb: "The planet's own machinery — engines that build weather out of sunlight and seawater.",
+    accent: '#5ec9b0',
+  },
   power: {
     title: 'Power & the Grid',
     blurb: 'How electricity is made, stepped up, and carried to your wall.',

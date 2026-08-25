@@ -54,6 +54,11 @@ const OVERRIDES = {
   // Step 2 ghosts the concrete and shows the whole thing: car, ropes, sheave,
   // counterweight.
   elevator: { step: 2 },
+  // step 1 is the right beat, but its turntable makes a full revolution per
+  // lap, so the default 0.45 frac catches the projector from behind — a grey
+  // box with a vent on it and no lens. frac 0 is the pose the step's camera
+  // was actually composed for: lens and beam toward the viewer.
+  projector: { frac: 0.02 },
 };
 
 mkdirSync(OUT, { recursive: true });

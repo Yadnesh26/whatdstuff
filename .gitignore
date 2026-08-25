@@ -65,7 +65,7 @@ logo/
 mixer/
 *.7z
 *.zip
-
+overlay assets/
 # Ad-hoc Playwright probes (CLAUDE.md: name them *.tmp.mjs, delete when done)
 scripts/*.tmp.mjs
 

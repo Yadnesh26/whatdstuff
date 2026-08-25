@@ -262,6 +262,35 @@ Check every frame for:
 
 Fix in video.js, re-render. Ship only what you would post.
 
+## Step 5 — follow-button overlay (ask, unless already told)
+
+After shipping the review in Step 4, ask the user whether they want the
+channel's animated "Follow" button popup composited onto this export — a
+short chroma-keyed clip that pops in over the top-right corner partway
+through the video. **Skip the question only if the user's request already
+said yes** (e.g. "export X with the follow overlay," or they said yes for
+this run earlier in the conversation) — in that case apply it directly, no
+extra prompt. Otherwise ask before touching the output; don't assume either
+way. This applies to every manual `export-content` run, short or long.
+
+```
+node scripts/add-follow-overlay.mjs renders/<id>/<format>-captioned.mp4
+```
+
+Composites `assets/overlay/follow-button.mp4` (chroma-keyed off its yellow
+background) at 15s into the video, top-right corner, sized to ~39% of frame
+width — the one zone verified clear of the 3D model, callout labels, the
+5s title card, and the caption rail across every explainer short checked so
+far (washing-machine, vacuum-cleaner). Writes `<format>-captioned-followed.mp4`
+alongside the original by default (never overwrites — pass `--out` or
+`--force` to change that). Re-check placement against a few extracted frames
+before trusting it blind on an explainer with unusually wide/flat
+cinematography — see the script's header comment for the crop/colorkey
+derivation if the overlay asset itself ever changes.
+
+The fully unattended `explainer-to-video` pipeline does NOT apply this (no
+one there to ask) — same rule as the end card.
+
 ## Facts that matter
 
 - Firearm explainers (semi-auto-pistol): do NOT export for short-form
