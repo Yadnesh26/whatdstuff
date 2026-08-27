@@ -50,7 +50,7 @@ export default defineExplainer({
       heading: '1 · One jump a second',
       body: "Look at the seconds hand. It doesn't sweep — it jumps, holds, jumps again, once a second, and it has done that every second since the battery went in. A mechanical watch hides a swinging balance wheel behind that motion. This one hides a sliver of sand.",
       hint: 'Drag to orbit · scroll to open it up.',
-      camera: { position: [1.2, 1.72, 3.6], target: [-0.48, 1.02, 0.16] },
+      camera: { position: [0.92, 1.52, 2.62], target: [-0.3, 1.03, 0.12] },
       dofAperture: 0.00003,
       focus: ['Seconds hand'],
       onEnter: ({ handles }) => {
@@ -62,9 +62,9 @@ export default defineExplainer({
     {
       id: 'movement',
       heading: '2 · Everything that keeps the time',
-      body: 'Undo the back and the whole works lifts out on one white plastic plate. There is almost nothing on it: a battery the size of a lentil, a black speck of a chip, a coil of copper finer than hair, and a silver capsule two millimetres long. Only one of those knows what a second is, and it is the capsule.',
+      body: 'Undo the back and the whole works lifts out on a single plate of ivory plastic. There is almost nothing on it: a battery the size of a lentil, a black speck of a chip, a coil of copper finer than hair, and a silver capsule two millimetres across. Only one of those knows what a second is, and it is the capsule.',
       hint: 'Case back lifted off · watch the current run battery to chip to coil.',
-      camera: { position: [0.85, 2.25, 2.35], target: [-0.4, 1.95, 0.24] },
+      camera: { position: [0.88, 2.55, 2.4], target: [-0.42, 2.2, 0.26] },
       dofAperture: 0.00008,
       focus: ['Quartz crystal', 'Battery'],
       onEnter: ({ handles }) => {
@@ -78,7 +78,7 @@ export default defineExplainer({
       heading: '3 · A tuning fork cut from sand',
       body: 'Inside the capsule, sealed in vacuum, is a tuning fork about as long as a grain of rice, cut from a single crystal of quartz. Quartz is piezoelectric both ways: squeeze it and it makes a voltage, feed it a voltage and it bends. So the chip taps it, the fork rings, the ringing makes its own voltage, and the chip taps again in time — locking onto the one frequency the fork was ground to. 32,768 vibrations a second, every second, held to a few parts in a million.',
       hint: 'Shown about five times life size, and slowed roughly thirty thousand times.',
-      camera: { position: [0.95, 2.62, 2.15], target: [0.31, 2.3, 0.42] },
+      camera: { position: [0.95, 2.9, 2.15], target: [0.31, 2.58, 0.42] },
       dofAperture: 0.00022,
       focus: ['Quartz tuning fork'],
       onEnter: ({ handles }) => {
@@ -91,7 +91,8 @@ export default defineExplainer({
       id: 'divider',
       heading: '4 · Counting down to one',
       body: "32,768 isn't a random number: it is two multiplied by itself fifteen times. Inside the chip sit fifteen switches in a row, each one flipping only when the switch above it has flipped twice — so every rung of this ladder runs at exactly half the speed of the rung above it. The top is a blur. Fifteen halvings down, the bottom rung flashes once, and that flash is the second.",
-      camera: { position: [1.0, 2.22, 1.68], target: [0.54, 2.0, 0.34] },
+      hint: 'Eight of the fifteen rungs shown — the top ones really do run too fast to see.',
+      camera: { position: [1.0, 2.5, 1.68], target: [0.54, 2.28, 0.34] },
       dofAperture: 0.00018,
       focus: ['One a second out'],
       onEnter: ({ handles }) => {
@@ -103,8 +104,8 @@ export default defineExplainer({
     {
       id: 'motor',
       heading: '5 · The kick',
-      body: 'The flash goes to the coil, and for a few thousandths of a second the coil becomes a magnet. Facing it, in a slot in the steel yoke, sits a permanent magnet barely a millimetre across — and that slot is bitten off-centre, which is the only thing deciding which way the magnet swings. It flips half a turn and stops. The next pulse arrives with the current running backwards and flips it another half turn, the same way round; then the coil goes quiet for the rest of the second, which is why the battery lasts years.',
-      camera: { position: [0.3, 2.05, 1.05], target: [-0.18, 1.87, 0.26] },
+      body: 'The flash goes to the coil, and for a few thousandths of a second the coil becomes a magnet. Facing it, in a slot in the steel yoke, sits a permanent magnet a millimetre and a half across — and that slot is bitten off-centre, which is the only thing deciding which way the magnet swings. It flips half a turn and stops. The next pulse arrives with the current running backwards and flips it another half turn, the same way round; then the coil goes quiet for the rest of the second, which is why the battery lasts years.',
+      camera: { position: [0.28, 2.32, 1.12], target: [-0.2, 2.14, 0.33] },
       dofAperture: 0.0003,
       focus: ['Rotor magnet', 'Coil'],
       onEnter: ({ handles }) => {
@@ -117,7 +118,7 @@ export default defineExplainer({
       id: 'train',
       heading: '6 · Half turns into hands',
       body: "Half a turn a second is far too fast for a seconds hand, so it goes through gears — but this train slows things down, where a mechanical watch's gears speed the mainspring up. Ten teeth drive sixty, then twelve drive sixty: thirty to one. Half a turn at the rotor comes out as six degrees at the centre of the dial, which is exactly one second on the face.",
-      camera: { position: [0.2, 2.18, 1.4], target: [-0.3, 1.94, 0.17] },
+      camera: { position: [0.3, 2.64, 1.98], target: [-0.26, 2.24, 0.22] },
       dofAperture: 0.00022,
       focus: ['Rotor pinion, 10 teeth', 'Seconds wheel'],
       onEnter: ({ handles }) => {

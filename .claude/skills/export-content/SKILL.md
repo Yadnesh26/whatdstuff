@@ -278,10 +278,13 @@ node scripts/add-follow-overlay.mjs renders/<id>/<format>-captioned.mp4
 ```
 
 Composites `assets/overlay/follow-button.mp4` (chroma-keyed off its yellow
-background) at 15s into the video, top-right corner, sized to ~39% of frame
-width — the one zone verified clear of the 3D model, callout labels, the
-5s title card, and the caption rail across every explainer short checked so
-far (washing-machine, vacuum-cleaner). Writes `<format>-captioned-followed.mp4`
+background) at 15s into the video, top-right zone — inset from both edges
+rather than flush into the corner (margin tightened to ~7% of frame width,
+2026-08-25, after it read as clipped-into-the-corner on the quartz-watch
+export) — sized to ~34% of frame width. That zone is verified clear of the
+3D model, callout labels, the 5s title card, and the caption rail across
+every explainer short checked so far (washing-machine, vacuum-cleaner).
+Writes `<format>-captioned-followed.mp4`
 alongside the original by default (never overwrites — pass `--out` or
 `--force` to change that). Re-check placement against a few extracted frames
 before trusting it blind on an explainer with unusually wide/flat

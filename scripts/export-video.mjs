@@ -119,9 +119,14 @@ const framesDir = join(outRoot, `${format}-frames`);
 rmSync(framesDir, { recursive: true, force: true });
 mkdirSync(framesDir, { recursive: true });
 
-// Real GPU in headless: without these flags Chromium renders WebGL on
-// SwiftShader (CPU) and frames cost ~1s each; with the GPU they're ~5-10x faster.
+// Real GPU in headless. TWO things are required, and the flags alone are NOT
+// enough: Playwright's default headless runs `chrome-headless-shell`, a build
+// with no GPU support at all, so it silently rasterizes WebGL on SwiftShader
+// (CPU) at ~2s/frame no matter what flags you pass. `channel: 'chromium'` runs
+// the FULL Chromium binary in new-headless mode, which can reach D3D11.
+// Verified 2026-08-26 by probing WEBGL_debug_renderer_info under both.
 const browser = await chromium.launch({
+  channel: 'chromium',
   args: ['--enable-gpu', '--use-angle=d3d11', '--ignore-gpu-blocklist', '--enable-webgl'],
 });
 const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });

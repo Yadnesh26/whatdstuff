@@ -8,14 +8,18 @@
 // This is a POST-PROCESS step, run after export-video.mjs — it composites
 // onto an already-finished MP4, it does not touch the render pipeline.
 //
-// Placement: top-right corner, sized to ~39% of the frame width. Verified
-// against washing-machine's short-final.mp4 (2026-08-23): the 3D model stays
+// Placement: top-right zone, inset from both edges (not flush into the
+// corner), sized to ~34% of the frame width. Verified against
+// washing-machine's short-final.mp4 (2026-08-23): the 3D model stays
 // centered/lower, callout labels stay near the model, captions are
 // bottom-anchored, and the title card (first 5s only) is centered — the top
 // corners are the one zone that's clear in every shot of every explainer
 // short. Re-check this against a few frames of a NEW explainer's layout
 // before trusting it blind if that explainer's cinematography is unusual
 // (e.g. a very wide/flat subject that fills the top of frame).
+// Margin tuned 2026-08-25 (quartz-watch export): the original margin sat the
+// button flush against the top-right corner, clipped rather than placed —
+// see the `margin` constant below for the fix.
 //
 // Crop/colorkey are tuned for the shipped asset (assets/overlay/
 // follow-button.mp4: 3840x2160, solid #F8D000 background, static button
@@ -88,9 +92,17 @@ const crop = opt('crop', '2450:1250:700:250');
 const keyColor = opt('key-color', '0xF8D000');
 const similarity = opt('similarity', '0.28');
 const blend = opt('blend', '0.10');
-const widthFrac = Number(opt('width-frac', '0.39'));
+const widthFrac = Number(opt('width-frac', '0.34'));
 const overlayW = Math.round(target.width * widthFrac);
-const margin = Math.round(target.width * 0.033); // ~36px at 1080 width
+// Margin from each edge. The original 0.033 (~36px at 1080 width) sat the
+// button flush against both the top and right edges — it read as clipped
+// into the very corner rather than placed in the frame (flagged against the
+// quartz-watch export, 2026-08-25). 0.07 (~76px at 1080) pulls it a full
+// button-height clear of both edges while staying in the top-right zone
+// verified clear of the model/callouts/captions; widthFrac also came down
+// slightly (0.39 -> 0.34) so the extra breathing room doesn't push it toward
+// the subject.
+const margin = Math.round(target.width * 0.07);
 
 const filter =
   `[1:v]crop=${crop},colorkey=${keyColor}:${similarity}:${blend},format=yuva420p,` +

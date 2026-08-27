@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { materials, box, studioPlinth, chargeQueue } from '../../framework/parts.js';
-import { beveledBox, gear, tubeAlong } from '../../framework/geometry.js';
+import { beveledBox, coil as coilWind, gear, tubeAlong } from '../../framework/geometry.js';
 import { clamp01, smooth, TAU } from '../../framework/motion.js';
 import { calloutSets } from '../../framework/callouts.js';
 import { smudgeMap } from '../../framework/textures.js';
@@ -52,7 +52,7 @@ const GLASS_R = 16.8 * MM; // 0.546
 
 const MOV_R = 13 * MM; // 0.4225 — 26 mm movement
 const PLATE_T = 0.06;
-const LIFT_Y = 1.02; // how far the movement rises out of the case
+const LIFT_Y = 1.3; // how far the movement rises out of the case
 const LIFT_Z = 0.1;
 
 // ONE lap = TICKS ticks (one watch-minute). Everything closes on a whole number:
@@ -91,7 +91,7 @@ const RLEN = Math.hypot(ROTOR.x, ROTOR.y);
 const FIFTH = { x: ROTOR.x * (1 - A1 / RLEN), y: ROTOR.y * (1 - A1 / RLEN) };
 
 const EL = {
-  batt: { x: 0.135, y: -0.06, r: 3.4 * MM }, // 0.1105 — 6.8 mm cell
+  batt: { x: 0.17, y: -0.14, r: 3.4 * MM }, // 0.1105 — 6.8 mm cell
   ic: { x: -0.03, y: 0.185 },
   xtal: { x: -0.23, y: 0.115 },
   coilX0: -0.325,
@@ -128,10 +128,10 @@ function strapRun(pts, width, thick, mat, stitchMat, group, segs) {
     const slab = beveledBox(width, thick, segLen * 1.4, mat, thick * 0.4);
     slab.position.copy(curve.getPointAt(u));
     slab.quaternion.setFromUnitVectors(axis, curve.getTangentAt(u).normalize());
-    slab.castShadow = true;
+    slab.castShadow = i % 2 === 0;
     slab.receiveShadow = true;
     group.add(slab);
-    if (i % 2 === 0) {
+    if (i % 3 === 0) {
       for (const sx of [-1, 1]) {
         const stitch = box(width * 0.05, thick * 0.3, segLen * 0.6, stitchMat);
         stitch.position.set(sx * width * 0.37, thick * 0.42, 0);
@@ -146,26 +146,31 @@ export function buildQuartzWatch({ scene }) {
   scene.add(group);
 
   // --- materials ------------------------------------------------------------
-  const caseSteel = materials.brushedSteel(0xc9ced6);
-  caseSteel.roughness = 0.66; // large curved band: keep the softbox off it
-  const bezelSteel = materials.brushedSteel(0xd2d7de);
-  bezelSteel.roughness = 0.52;
+  // Map-free metal. The brushedSteel/aluminum presets carry a brushed
+  // roughness AND normal map; at the 0.9-2.0 unit camera distances this
+  // explainer films at, one texel covers a whole part and every steel piece
+  // reads as scratched hair (battery, crystal can and case band all failed
+  // that way on the first render). Plain physical metal is correct at this
+  // scale.
+  const metal = (color, roughness) =>
+    new THREE.MeshPhysicalMaterial({ color, metalness: 1, roughness });
+  const caseSteel = metal(0xc9ced6, 0.34);
+  const bezelSteel = metal(0xd2d7de, 0.4);
   const darkMat = materials.rubber(0x14161a); // dark interiors — never a mirror
   const linerMat = darkMat.clone();
   linerMat.side = THREE.BackSide;
-  const dialMat = materials.paintedMetal(0x1b2430);
-  const indexMat = materials.brushedSteel(0xdfe4ea);
-  indexMat.roughness = 0.45;
-  const handMat = materials.brushedSteel(0xe3e8ee);
-  handMat.roughness = 0.42;
+  const dialMat = materials.paintedMetal(0x121a24);
+  const indexMat = metal(0xdfe4ea, 0.3);
+  const handMat = metal(0xe3e8ee, 0.26);
   const accentMat = materials.paintedMetal(0x7ad7f0);
-  const lumeMat = materials.plastic(0xd9e6d2);
+  const lumeMat = materials.plastic(0xe9f2e2);
 
   // Real quartz movements are built on a white/ivory plastic mainplate — the
   // single best thing about filming one, because every tiny brass and steel
   // part reads against it.
-  const plateMat = materials.polymer(0xe6e1d6);
-  plateMat.roughness = 0.82;
+  const plateMat = materials.polymer(0xc9c0ac);
+  plateMat.roughness = 0.94;
+  plateMat.clearcoat = 0; // white albedo + coat specular is what blew the macro steps
   const spacerMat = materials.polymer(0x24272c);
   spacerMat.side = THREE.BackSide;
   const pcbMat = materials.polymer(0x14312a);
@@ -176,21 +181,18 @@ export function buildQuartzWatch({ scene }) {
     roughness: 0.32,
   });
   const epoxyMat = materials.polymer(0x0e1013);
-  const cellMat = materials.brushedSteel(0xd6dae0);
-  cellMat.roughness = 0.4;
-  const cellRim = materials.brushedSteel(0x9aa1aa);
-  cellRim.roughness = 0.55;
-  const canMat = materials.brushedSteel(0xbfc6cf);
-  canMat.roughness = 0.42;
+  const cellMat = metal(0xccd2d9, 0.5);
+  const cellFace = metal(0xb9bfc7, 0.42);
+  const cellRim = metal(0x9aa1aa, 0.46);
+  const canMat = metal(0xc2c9d2, 0.28);
   const insertCanMat = canMat.clone();
   insertCanMat.side = THREE.DoubleSide;
   const copperMat = new THREE.MeshPhysicalMaterial({
-    color: 0xb06a35,
+    color: 0x99552a,
     metalness: 1,
-    roughness: 0.44,
+    roughness: 0.62,
   });
-  const yokeMat = materials.brushedSteel(0x9fa7b1);
-  yokeMat.roughness = 0.55;
+  const yokeMat = metal(0xaeb6c0, 0.56);
   // Extruded gear teeth have ad-hoc UVs — map-free materials only here.
   const brassMat = new THREE.MeshPhysicalMaterial({
     color: 0xc9a24a,
@@ -255,6 +257,14 @@ export function buildQuartzWatch({ scene }) {
   cell.position.set(EL.batt.x, EL.batt.y, Z.batt);
   cell.castShadow = true;
   movement.add(cell);
+  const cellTop = new THREE.Mesh(
+    new THREE.CylinderGeometry(EL.batt.r * 0.72, EL.batt.r * 0.72, 0.002, 40).rotateX(
+      Math.PI / 2,
+    ),
+    cellFace,
+  );
+  cellTop.position.set(EL.batt.x, EL.batt.y, Z.batt - 0.043);
+  movement.add(cellTop);
   const cellSkirt = new THREE.Mesh(
     new THREE.CylinderGeometry(EL.batt.r * 1.03, EL.batt.r * 1.03, 0.026, 40).rotateX(
       Math.PI / 2,
@@ -305,12 +315,19 @@ export function buildQuartzWatch({ scene }) {
   const coilCore = box(coilLen + 0.06, 0.026, 0.026, yokeMat);
   coilCore.position.set(coilMid, EL.coilY, Z.coil);
   motor.add(coilCore);
-  const winding = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.045, 0.045, coilLen * 0.86, 32, 1, true).rotateZ(Math.PI / 2),
+  // ~30 visible turns standing in for the real ten thousand of 20-micron wire
+  const winding = coilWind(
+    {
+      turns: 24,
+      radius: 0.042,
+      length: coilLen * 0.84,
+      wireRadius: 0.0038,
+      segmentsPerTurn: 10,
+    },
     copperMat,
-  );
+  ).mesh;
+  winding.rotation.z = Math.PI / 2;
   winding.position.set(coilMid, EL.coilY, Z.coil);
-  winding.castShadow = true;
   motor.add(winding);
   for (const sx of [-1, 1]) {
     const cheek = new THREE.Mesh(
@@ -330,15 +347,15 @@ export function buildQuartzWatch({ scene }) {
     bar.rotation.z = Math.atan2(by - ay, bx - ax);
     return bar;
   }
-  motor.add(yokeBar(EL.coilX1, EL.coilY, ROTOR.x, ROTOR.y, 0.05));
-  motor.add(yokeBar(EL.coilX0, EL.coilY, -0.3, -0.35, 0.05));
-  motor.add(yokeBar(-0.3, -0.35, ROTOR.x, ROTOR.y, 0.05));
+  motor.add(yokeBar(EL.coilX1, EL.coilY, ROTOR.x, ROTOR.y, 0.062));
+  motor.add(yokeBar(EL.coilX0, EL.coilY, -0.31, -0.36, 0.062));
+  motor.add(yokeBar(-0.31, -0.36, ROTOR.x, ROTOR.y, 0.062));
 
   // the bored seat: an annulus, with two notches bitten out of the bore
   const seatShape = new THREE.Shape();
-  seatShape.absarc(0, 0, 0.058, 0, TAU, false);
+  seatShape.absarc(0, 0, 0.076, 0, TAU, false);
   const seatBore = new THREE.Path();
-  seatBore.absarc(0, 0, 0.029, 0, TAU, true);
+  seatBore.absarc(0, 0, 0.043, 0, TAU, true); // magnet 0.036 + a real air gap
   seatShape.holes.push(seatBore);
   const seat = new THREE.Mesh(
     new THREE.ExtrudeGeometry(seatShape, {
@@ -355,8 +372,8 @@ export function buildQuartzWatch({ scene }) {
   motor.add(seat);
   const notches = [];
   for (const na of [0.72, 0.72 + Math.PI]) {
-    const notch = new THREE.Mesh(new THREE.SphereGeometry(0.013, 12, 10), darkMat);
-    notch.position.set(ROTOR.x + Math.cos(na) * 0.031, ROTOR.y + Math.sin(na) * 0.031, Z.stator);
+    const notch = new THREE.Mesh(new THREE.SphereGeometry(0.014, 12, 10), darkMat);
+    notch.position.set(ROTOR.x + Math.cos(na) * 0.046, ROTOR.y + Math.sin(na) * 0.046, Z.stator);
     motor.add(notch);
     notches.push(notch);
   }
@@ -371,10 +388,19 @@ export function buildQuartzWatch({ scene }) {
     [0, 0xb4453c],
     [Math.PI, 0x4d5f7d],
   ]) {
+    // a hair of angular clearance: coincident cut faces on the two halves
+    // z-fought into stripes right across the magnet
     const half = new THREE.Mesh(
-      new THREE.CylinderGeometry(magR, magR, 0.05, 24, 1, false, poleStart, Math.PI).rotateX(
-        Math.PI / 2,
-      ),
+      new THREE.CylinderGeometry(
+        magR,
+        magR,
+        0.05,
+        24,
+        1,
+        false,
+        poleStart + 0.02,
+        Math.PI - 0.04,
+      ).rotateX(Math.PI / 2),
       materials.paintedMetal(poleColor),
     );
     half.position.z = Z.stator - 0.004;
@@ -397,11 +423,11 @@ export function buildQuartzWatch({ scene }) {
   // flash on at the pulse and vanish. That absence IS the battery-life point.
   const fieldArcs = [];
   for (const fa of [0.72 + Math.PI / 2, 0.72 - Math.PI / 2]) {
-    const arcMat = materials.glow(0x7ad7f0, 1.8);
+    const arcMat = materials.glow(0x7ad7f0, 0.85);
     arcMat.transparent = true;
     arcMat.opacity = 0;
     arcMat.depthWrite = false;
-    const arc = new THREE.Mesh(new THREE.TorusGeometry(0.074, 0.008, 8, 28, 1.5), arcMat);
+    const arc = new THREE.Mesh(new THREE.TorusGeometry(0.092, 0.008, 8, 28, 1.5), arcMat);
     arc.position.set(ROTOR.x, ROTOR.y, Z.stator - 0.012);
     arc.rotation.z = fa - 0.75;
     motor.add(arc);
@@ -467,13 +493,6 @@ export function buildQuartzWatch({ scene }) {
   const fifth = trainWheel(FIFTH, 60, P_FIFTH, 12, P_FIFTH_PIN);
   const secondsWheel = trainWheel({ x: 0, y: 0 }, 60, P_SECONDS, 0, 0);
 
-  // Train bridge — a narrow steel strap over the fifth-wheel arbor only, so
-  // nothing the copy names ends up hidden underneath it.
-  const bridge = beveledBox(0.2, 0.07, 0.012, yokeMat, 0.008);
-  bridge.position.set(FIFTH.x - 0.05, FIFTH.y + 0.03, Z.bridge);
-  bridge.rotation.z = 0.55;
-  movement.add(bridge);
-
   // Motion works: the coaxial stack under the dial that gears the seconds down
   // to the minute and hour hands. Held static — at 60:1 and 720:1 they move 6
   // and 0.5 degrees per lap, invisible, and pinning them keeps the loop
@@ -509,13 +528,13 @@ export function buildQuartzWatch({ scene }) {
   for (let i = 0; i < 12; i++) {
     const a = (i * TAU) / 12;
     const long = i % 3 === 0;
-    const index = beveledBox(long ? 0.036 : 0.022, long ? 0.09 : 0.06, 0.012, indexMat, 0.005);
-    const rr = DIAL_R - (long ? 0.07 : 0.058);
+    const index = beveledBox(long ? 0.05 : 0.032, long ? 0.115 : 0.078, 0.014, indexMat, 0.005);
+    const rr = DIAL_R - (long ? 0.082 : 0.068);
     index.position.set(Math.sin(a) * rr, Math.cos(a) * rr, Z.dial + 0.008);
     index.rotation.z = -a;
     dress.add(index);
-    const lume = box(long ? 0.024 : 0.014, long ? 0.05 : 0.034, 0.004, lumeMat);
-    lume.position.set(Math.sin(a) * rr, Math.cos(a) * rr, Z.dial + 0.015);
+    const lume = box(long ? 0.034 : 0.021, long ? 0.075 : 0.05, 0.005, lumeMat);
+    lume.position.set(Math.sin(a) * rr, Math.cos(a) * rr, Z.dial + 0.017);
     lume.rotation.z = -a;
     dress.add(lume);
   }
@@ -538,16 +557,25 @@ export function buildQuartzWatch({ scene }) {
     dress.add(h);
     return h;
   }
-  const hourHand = watchHand(0.046, 0.3, 0.055, handMat, Z.hourH);
+  const hourHand = watchHand(0.056, 0.3, 0.055, handMat, Z.hourH);
   hourHand.rotation.z = -((10 + 9 / 60) / 12) * TAU;
-  const minuteHand = watchHand(0.032, 0.44, 0.06, handMat, Z.minH);
+  const minuteHand = watchHand(0.04, 0.44, 0.06, handMat, Z.minH);
   minuteHand.rotation.z = -(9 / 60) * TAU;
+  for (const [hand, w, len] of [
+    [hourHand, 0.03, 0.2],
+    [minuteHand, 0.02, 0.32],
+  ]) {
+    const inlay = box(w, len, 0.005, lumeMat);
+    inlay.position.set(0, len * 0.5 + 0.03, 0.005);
+    hand.add(inlay);
+  }
   const secondsHand = watchHand(0.012, 0.485, 0.115, accentMat, Z.secH);
+  // the cap has to clear the glass inner face at CASE_Z1 - 0.039 = 0.136
   const handCap = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.026, 0.026, 0.03, 20).rotateX(Math.PI / 2),
+    new THREE.CylinderGeometry(0.026, 0.026, 0.02, 20).rotateX(Math.PI / 2),
     accentMat,
   );
-  handCap.position.z = Z.secH + 0.012;
+  handCap.position.z = Z.secH + 0.006;
   dress.add(handCap);
 
   // ==========================================================================
@@ -608,11 +636,11 @@ export function buildQuartzWatch({ scene }) {
     thickness: 0.05,
     ior: 1.52,
     transparent: false,
-    iridescence: 0.12,
+    iridescence: 0.05,
     iridescenceIOR: 1.3,
     iridescenceThicknessRange: [120, 420],
-    clearcoat: 0.5,
-    clearcoatRoughness: 0.22,
+    clearcoat: 0.22,
+    clearcoatRoughness: 0.3,
     clearcoatRoughnessMap: smudgeMap(),
   });
   const glass = new THREE.Mesh(
@@ -641,12 +669,12 @@ export function buildQuartzWatch({ scene }) {
   watchCase.add(caseback);
 
   for (const sy of [1, -1]) {
-    const lug = beveledBox(0.34, 0.2, 0.16, caseSteel, 0.035);
+    const lug = beveledBox(0.28, 0.15, 0.12, caseSteel, 0.03);
     lug.position.set(0, sy * CASE_R * 0.99, -0.06);
     lug.rotation.x = sy * 0.12;
     watchCase.add(lug);
     const barPin = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.016, 0.016, 0.36, 10).rotateZ(Math.PI / 2),
+      new THREE.CylinderGeometry(0.012, 0.012, 0.3, 10).rotateZ(Math.PI / 2),
       bezelSteel,
     );
     barPin.position.set(0, sy * CASE_R * 1.03, -0.09);
@@ -666,8 +694,8 @@ export function buildQuartzWatch({ scene }) {
   );
   crown.position.set(CASE_R + 0.11, 0, -0.02);
   watchCase.add(crown);
-  for (let i = 0; i < 14; i++) {
-    const a = (i * TAU) / 14;
+  for (let i = 0; i < 10; i++) {
+    const a = (i * TAU) / 10;
     const ridge = box(0.078, 0.012, 0.012, caseSteel);
     ridge.position.set(CASE_R + 0.11, Math.cos(a) * 0.071, -0.02 + Math.sin(a) * 0.071);
     ridge.rotation.x = -a;
@@ -678,10 +706,10 @@ export function buildQuartzWatch({ scene }) {
   // STRAP + PUCK — the watch stands on its own curled strap. No wrist, no arm.
   // ==========================================================================
   const puck = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.02, 1.06, 0.09, 64),
+    new THREE.CylinderGeometry(1.06, 1.1, 0.09, 64),
     materials.polymer(0x1a1d22),
   );
-  puck.position.set(0, PUCK_TOP - 0.045, -0.35);
+  puck.position.set(0, PUCK_TOP - 0.045, -0.2);
   puck.receiveShadow = true;
   puck.castShadow = true;
   group.add(puck);
@@ -690,18 +718,18 @@ export function buildQuartzWatch({ scene }) {
   group.add(strapGroup);
   strapRun(
     [
-      [0, CY - CASE_R * 1.02, -0.1],
-      [0, CY - CASE_R - 0.08, -0.32],
-      [0, PUCK_TOP + 0.035, -0.6],
-      [0, PUCK_TOP + 0.045, -0.86],
-      [0, PUCK_TOP + 0.1, -1.06],
+      [0, CY - CASE_R * 1.02, -0.08],
+      [0, CY - CASE_R - 0.045, 0.04],
+      [0, PUCK_TOP + 0.045, 0.24],
+      [0, PUCK_TOP + 0.032, 0.52],
+      [0, PUCK_TOP + 0.085, 0.76],
     ],
     0.3,
     0.05,
     leatherMat,
     stitchMat,
     strapGroup,
-    18,
+    12,
   );
   strapRun(
     [
@@ -717,7 +745,7 @@ export function buildQuartzWatch({ scene }) {
     leatherMat,
     stitchMat,
     strapGroup,
-    26,
+    16,
   );
 
   group.add(studioPlinth({ w: 3.8, d: 2.6 }));
@@ -728,20 +756,20 @@ export function buildQuartzWatch({ scene }) {
   // a deliberately oversized stand-in with a callout back to the real can.
   // ==========================================================================
   const forkInsert = new THREE.Group();
-  forkInsert.position.set(0.66, 2.3, 0.36);
+  forkInsert.position.set(0.66, 2.58, 0.36);
   forkInsert.rotation.set(-0.06, -0.38, 0);
   group.add(forkInsert);
 
   const FORK_L = 0.62;
   const TINE_W = 0.082;
   const TINE_T = 0.036;
-  const forkBase = beveledBox(0.238, 0.13, TINE_T, quartzMat, 0.012);
+  const forkBase = beveledBox(0.266, 0.15, TINE_T * 1.15, quartzMat, 0.014);
   forkBase.position.y = -FORK_L * 0.5;
   forkInsert.add(forkBase);
 
   function buildTine(sign) {
     const root = new THREE.Group();
-    root.position.set(sign * 0.075, -FORK_L * 0.44, 0);
+    root.position.set(sign * 0.092, -FORK_L * 0.44, 0);
     const half = FORK_L * 0.45;
     const lower = beveledBox(TINE_W, half, TINE_T, quartzMat, 0.01);
     lower.geometry.translate(0, half / 2, 0);
@@ -772,12 +800,13 @@ export function buildQuartzWatch({ scene }) {
   for (const gs of [-1, 1]) {
     const ghostMat = quartzMat.clone();
     ghostMat.transparent = true;
-    ghostMat.opacity = 0.15;
+    ghostMat.opacity = 0.07;
+    ghostMat.clearcoat = 0; // coat specular ignores opacity and reads solid
     ghostMat.depthWrite = false;
     for (const sx of [-1, 1]) {
       const arm = beveledBox(TINE_W, FORK_L * 0.9, TINE_T, ghostMat, 0.01);
       arm.geometry.translate(0, (FORK_L * 0.9) / 2, 0);
-      arm.position.set(sx * 0.075, -FORK_L * 0.44, 0);
+      arm.position.set(sx * 0.092, -FORK_L * 0.44, 0);
       arm.rotation.z = -sx * gs * 0.075;
       forkInsert.add(arm);
     }
@@ -787,14 +816,16 @@ export function buildQuartzWatch({ scene }) {
   // interior never turns into a mirror.
   const insertCan = new THREE.Group();
   forkInsert.add(insertCan);
+  // thetaStart PI/2 keeps the SHELL on the far side (three puts theta 0 at
+  // +Z), so the cut-away opens toward the camera instead of hiding the fork
   const insertShell = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.15, 0.15, FORK_L * 1.5, 32, 1, true, 0.5, Math.PI),
+    new THREE.CylinderGeometry(0.15, 0.15, FORK_L * 1.5, 32, 1, true, Math.PI / 2, Math.PI),
     insertCanMat,
   );
   insertShell.position.set(0, -FORK_L * 0.12, -0.02);
   insertCan.add(insertShell);
   const insertLiner = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.146, 0.146, FORK_L * 1.5, 32, 1, true, 0.5, Math.PI),
+    new THREE.CylinderGeometry(0.146, 0.146, FORK_L * 1.5, 32, 1, true, Math.PI / 2, Math.PI),
     linerMat,
   );
   insertLiner.position.copy(insertShell.position);
@@ -811,7 +842,7 @@ export function buildQuartzWatch({ scene }) {
     dotMat.opacity = 0;
     dotMat.depthWrite = false;
     const dot = new THREE.Mesh(new THREE.SphereGeometry(0.019, 12, 10), dotMat);
-    dot.position.set(sx * 0.075, 0, TINE_T * 0.7);
+    dot.position.set(sx * 0.092, 0, TINE_T * 0.7);
     forkInsert.add(dot);
     forkFlow.push(dot);
   }
@@ -823,7 +854,7 @@ export function buildQuartzWatch({ scene }) {
   // the mechanism, filmed as a bench readout rather than drawn as a diagram.
   // ==========================================================================
   const ladder = new THREE.Group();
-  ladder.position.set(0.86, 2.0, 0.3);
+  ladder.position.set(0.86, 2.28, 0.3);
   ladder.rotation.set(-0.05, -0.42, 0);
   group.add(ladder);
   ladder.add(beveledBox(0.72, 0.56, 0.03, materials.polymer(0x0d1014), 0.02));
@@ -852,11 +883,11 @@ export function buildQuartzWatch({ scene }) {
   L('dial', watchCase, 'Mineral glass', [0.42, -0.33, 0.16], -30, 60);
   L('dial', watchCase, 'Crown', [CASE_R + 0.11, 0, -0.02], 12, 54);
 
-  L('movement', cell, 'Battery', [0, -0.05, -0.05], -58, 62);
+  L('movement', cell, 'Battery', [0, -0.05, -0.05], 200, 64);
   L('movement', xtalCan, 'Quartz crystal', [0, 0.09, -0.02], 68, 66);
   L('movement', ic, 'Integrated circuit', [0.02, 0.06, -0.02], 40, 62);
-  L('movement', winding, 'Coil', [0, -0.05, -0.05], -122, 58);
-  L('movement', rotor, 'Rotor', [0, -0.05, -0.05], -68, 54);
+  L('movement', winding, 'Coil', [0, -0.05, -0.05], -48, 58);
+  L('movement', rotor, 'Rotor', [0, -0.05, -0.05], -96, 58);
 
   L('crystal', forkInsert, 'Quartz tuning fork', [0, 0.34, 0.05], 58, 66);
   L('crystal', tineR.upperPivot, 'Gold electrodes', [0.05, 0.12, 0.03], 18, 60);
@@ -867,14 +898,14 @@ export function buildQuartzWatch({ scene }) {
   L('divider', ic, 'Fifteen halvings inside', [0.02, 0.05, -0.02], 48, 66);
 
   L('motor', winding, 'Coil', [0, 0.05, -0.05], 128, 58);
-  L('motor', notches[0], 'Notch in the yoke', [0.01, 0.02, -0.02], 58, 62);
-  L('motor', rotor, 'Rotor magnet', [0, -0.055, -0.05], -60, 58);
-  L('motor', seat, 'Steel stator', [-0.09, -0.07, -0.02], -128, 58);
+  L('motor', notches[0], 'Notch in the yoke', [0.01, 0.02, -0.02], 104, 62);
+  L('motor', rotor, 'Rotor magnet', [0, -0.055, -0.05], -96, 66);
+  L('motor', seat, 'Steel stator', [0.02, -0.062, -0.02], -100, 62);
 
-  L('train', rotor, 'Rotor pinion, 10 teeth', [0, -0.05, 0.05], -62, 64);
-  L('train', fifth, 'Fifth wheel, 60 teeth', [0.07, -0.09, 0.05], -30, 60);
-  L('train', secondsWheel, 'Seconds wheel', [0.1, 0.06, 0.05], 42, 58);
-  L('train', minuteWheel, 'Minute wheel', [-0.04, 0.06, 0.05], 118, 58);
+  L('train', rotor, 'Rotor pinion, 10 teeth', [0, 0, 0.06], -68, 118);
+  L('train', fifth, 'Fifth wheel, 60 teeth', [0.09, -0.06, 0.05], -22, 132);
+  L('train', secondsWheel, 'Seconds wheel', [0.08, 0.08, 0.05], 46, 124);
+  L('train', minuteWheel, 'Minute wheel', [-0.04, 0.05, 0.05], 132, 104);
 
   // ==========================================================================
   // POSE — ONE scalar drives the machine; everything else is pinned per step
@@ -900,25 +931,25 @@ export function buildQuartzWatch({ scene }) {
     fieldArcs.forEach((arc, i) => {
       const warm = (i === 0) === forward;
       arc.visible = state.fieldViz > 0;
-      arc.material.opacity = live * 0.85;
+      arc.material.opacity = live * 0.38;
       arc.material.color.setHex(warm ? 0xff9a5c : 0x7ad7f0);
       arc.material.emissive.setHex(warm ? 0xff9a5c : 0x7ad7f0);
     });
-    winding.material.emissive.setRGB(live * 0.5, live * 0.24, live * 0.06);
+    winding.material.emissive.setRGB(live * 0.14, live * 0.065, live * 0.018);
 
     // current beads: one pass per tick, so a lap is exactly 60 passes
     flow.setFront((tick % 1) * 1.55, state.reveal > 0.5);
 
     // The fork: one flex per tick on screen — slowed roughly thirty thousand
     // times from the real 32,768 a second.
-    const flex = Math.sin(TAU * tick) * 0.075;
+    const flex = Math.cos(TAU * tick) * 0.055;
     tineL.root.rotation.z = flex;
     tineL.upperPivot.rotation.z = flex;
     tineR.root.rotation.z = -flex;
     tineR.upperPivot.rotation.z = -flex;
     forkFlow.forEach((dot, i) => {
       const sgn = i === 0 ? 1 : -1;
-      const v = Math.max(0, sgn * Math.sin(TAU * tick));
+      const v = Math.max(0, sgn * Math.cos(TAU * tick));
       dot.material.opacity = v * 0.9;
       dot.position.y = -0.1 + v * 0.34;
     });
