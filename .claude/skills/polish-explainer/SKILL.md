@@ -49,6 +49,24 @@ optional:
 
 Work top to bottom; stop where the user's appetite stops.
 
+### Rung 0 — Buy the budget back first [VALIDATED — website (2026-08-27)]
+
+Measure the baseline BEFORE the ladder (below), and if it is already near the
+10 ms ceiling, spend the first pass on draw calls rather than on looks — every
+later rung gets cheaper and some only become affordable at all. On `website`
+the baseline was 8.5 ms / 697 calls, leaving 1.5 ms of headroom: not enough for
+anything interesting. Two InstancedMesh conversions of geometry that never
+moves relative to its own parent — 70 keyboard keys, and 7 blades x 10 fans —
+took it to 6.2 ms / 447 calls, and the finished pass (with added fillets,
+hinge, lathed platters, rail holes and three smudge maps) still landed at
+7.3 ms, BELOW the untouched baseline.
+Two side effects worth knowing: the mobile `touch-scroll`/`touch-orbit` gates in
+verify.mjs had been failing on `page.goto` timeout for this scene and started
+passing once the frame got cheaper (they open a second page in the same
+browser, which is where a heavy scene tips over); and instanced greebling is
+what makes rung 1 nearly free — `website` added hinge barrels, feet, rack rail
+holes and lathed platters for +13 draw calls total.
+
 ### Rung 1 — Fillets and micro-detail [VALIDATED pattern]
 
 Nothing real has a sharp edge; bevels catching light are the single biggest
@@ -125,6 +143,16 @@ Nothing real has a sharp edge; bevels catching light are the single biggest
   0.08 -> 0.22 so the map has something to modulate. Zero change in clipped px.
   A rear screen that has never been thumbed is one of the loudest
   born-in-a-computer tells on any consumer product.
+  CONFIRMED a third time (2026-08-27, website: laptop lid/palm rest, trackpad,
+  and screen cover glass) — still zero change in clipped px, and the cheapest
+  credibility win in that whole pass. Two notes. (a) On a bare aluminium shell
+  raise `clearcoat` 0.18 -> 0.45 alongside `clearcoatRoughness` 0.24 so the map
+  has coat to modulate; at 0.18 it is invisible. (b) When the "screen" is not
+  one material but a stack of emissive page blocks, you cannot map the display
+  itself — add a separate cover-glass plate over it (`opacity: 0.05`,
+  `depthWrite: false`, `clearcoat: 0.9`, smudge on clearcoatRoughness). It MUST
+  be plain transparent, never transmissive: the blocks behind it are themselves
+  transparent and the transmission pass would erase all of them.
 - **Real refractive glass** [VALIDATED — mechanical-watch (2026-07-30),
   domed crystal]: replace the fake opacity-glass preset with `transmission: 1,
   roughness: 0.04, thickness: 0.08` (thin shells like a watch crystal; thicker
@@ -213,7 +241,15 @@ the existing `brushedMap`/`grimeMap` style):
   Re-run the clipped-pixel scan at EVERY step after enabling DOF. HONEST
   WARNING: BokehPass is a simple shader and can look smeary rather than
   filmic — if a screenshot round doesn't clearly win, drop DOF entirely
-  rather than ship a mediocre blur. CONFIRMED again (mechanical-watch,
+  rather than ship a mediocre blur.
+  DECLINED on website (2026-08-27) without trying it, and the reasoning
+  generalises: that scene's macro steps are a rack of bright steel sled faces
+  and chrome platters — the exact bright-metal-at-macro profile that produced
+  the pistol's 65 -> 235 clipped-px blowout — and post-instancing timings still
+  spiked to 8.5-9 ms on individual runs, leaving no room for a full-screen pass
+  on EVERY step. When the scene is bright-metal-heavy AND the budget is inside
+  ~2 ms of the ceiling, skip this rung rather than spend a cycle discovering
+  both problems. CONFIRMED again (mechanical-watch,
   2026-07-30, escapement/balance macro steps): used a more conservative
   0.00012 aperture (not the full 0.00016) specifically because this scene
   already had a known bright-plate hotspot behind the gear train (see the
@@ -287,6 +323,21 @@ edges).
   phase 0 against phase 1-1e-6 and diff the framebuffer — mean abs delta should
   be ~0/255 (measured 0.0002 across a 1280x800 frame). Takes one throwaway
   Playwright script and is the only real evidence the loop contract holds.
+  TRAP, cost a full round on website (2026-08-27): do NOT sample the first
+  frame with `tl.seek(0)`. On a paused anime timeline seek(0) does not fire
+  onUpdate, so the pose stays at wherever playback left it and you diff a stale
+  mid-lap frame against a real end frame. Every step then reports a huge bogus
+  seam (one read 7.09/255, and its "phase 0" screenshot showed the scene fully
+  mid-animation). Seek `lap * 1e-6` instead — a real seek, and 6 microseconds
+  of animation is indistinguishable from zero. Also render the SAME phase twice
+  as a control: this renderer proved bit-deterministic (noise floor 0.0000), so
+  any non-zero delta after that is real and worth chasing.
+  What the corrected probe then caught on website, which pose-hash sampling had
+  missed: a callout-card fade whose `win()` fall window ran to 1.05, leaving the
+  last card a fifth lit at the wrap and snapping it dark once per lap
+  (0.0238 -> 0.0003 after the fix). Rule of thumb: every rise/fall window driven
+  off the lap parameter must OPEN and CLOSE inside [0,1] — check the last index
+  of any `i`-staggered window, since that is the one that overruns.
 - **Camera moves with intent**: push in by dollying the camera, never by
   animating FOV; track parallel to a flow being explained (fluid path, sliding
   piston) so the viewer reads the spatial route; put the point of interest on a

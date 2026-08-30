@@ -39,6 +39,11 @@ const OUT = 'public/plates';
 // later step frames better WITHOUT changing the in-app camera, pin it here —
 // otherwise a plain `make-plates.mjs` run silently reverts the fix.
 const OVERRIDES = {
+  // step 1 is the right opening beat but the wrong card: a shut stainless box
+  // is a white rectangle that could be an oven, a fridge or a cupboard. Step 2
+  // drops the door and rolls the racks out — plates, glasses and the dispenser,
+  // instantly legible as a dishwasher at thumbnail size.
+  dishwasher: { step: 2 },
   // step 1 sits the engine high-left with the plume running off-frame; the
   // sealed-and-running finale is the same editorial beat, framed tighter.
   'rocket-engine': { step: 9 },
@@ -59,6 +64,17 @@ const OVERRIDES = {
   // box with a vent on it and no lens. frac 0 is the pose the step's camera
   // was actually composed for: lens and beam toward the viewer.
   projector: { frac: 0.02 },
+  // step 1 is the whole two-machine corridor, which needs the width the text
+  // panel normally eats — with the panel hidden the laptop and rack shrink to
+  // two specks with a dead band between them. Step 5 is the open application
+  // sled: board, heatsink and memory filling the frame, which is the image
+  // worth clicking on.
+  website: { step: 5 },
+  // every step here is composed hard right for the panel, so step 1's wide
+  // hero leaves a third of the card empty once the panel is hidden. Step 2 is
+  // the close pass over the district: buildings, park and the expressway X
+  // filling the frame, which is what the card needs to say "3D city map".
+  'google-maps': { step: 2, frac: 0.55 },
 };
 
 mkdirSync(OUT, { recursive: true });
