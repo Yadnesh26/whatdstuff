@@ -127,7 +127,7 @@ export default defineExplainer({
       id: 'chordae',
       heading: 'The rigging that stops them turning inside out',
       body: 'At 120 mmHg the mitral valve has every reason to blow backwards into the atrium, the way an umbrella inverts in a gust. It does not, because it is guyed. Cone-shaped papillary muscles rise off the ventricle wall, and from their tips run the chordae tendineae — fine tendon cords fanning out to the free edge of each flap. They never pull the valve shut; pressure does that. They tighten at the same instant the ventricle does and simply refuse to let the edges travel any further, exactly like rigging on a parachute canopy. Snap one and the flap flails, and the leak that follows is audible across the room.',
-      camera: { position: [1.5, 1.95, 1.95], target: [0.15, 1.3, -0.05] },
+      camera: { position: [1.3, 2.5, 2.2], target: [-0.25, 1.35, -0.05] },
       dofAperture: 0.00035,
       focus: ['Chordae tendineae', 'Papillary muscle'],
       onEnter: view({ labels: 'chordae', lid: 0, reveal: 1 }),

@@ -48,7 +48,7 @@ import { calloutSets } from '../../framework/callouts.js';
 //
 // STATE SCALARS (one pose fn, `set({...})`):
 //   beat    0..1 phase of ONE cardiac cycle — drives every moving thing
-//   lid     anterior half-shell: 1 solid / 0.12 ghosted outline / 0 gone
+//   lid     the anterior window: 1 wall in place -> 0 lifted out
 //   reveal  0 interior hidden -> 1 chambers, valves and rigging visible
 //   flow    0 -> 1 blood packets riding the circuit
 //   xray    0 -> 1 great vessels go translucent so the blood shows through
@@ -424,8 +424,7 @@ export function buildHeart({ scene }) {
   const coreMats = [matEpi, matEndo, matCut];
   // the anterior half-shell needs its OWN materials so it can ghost without
   // taking the rest of the organ with it
-  const lidMats = coreMats.map((m) => m.clone());
-  const lidBaseCoat = [0.3, 0.5, 0];
+  const lidMats = coreMats;
 
   const matLeaflet = new THREE.MeshPhysicalMaterial({
     color: 0xe4cfc2,
@@ -1156,6 +1155,7 @@ export function buildHeart({ scene }) {
     'wiring',
     'coronary',
   ]);
+  const proud = (p, dy = 0.035) => [p[0], p[1] + dy, p[2]];
   const surfLV = (u, deg, off = 0.04) => {
     const p = ptAt(lvCentre(u, false), lvOuter(u, false) + off, deg);
     return [p[0], p[1], p[2]];
@@ -1165,8 +1165,8 @@ export function buildHeart({ scene }) {
     return [p[0], p[1], p[2]];
   };
 
-  labels.add('exterior', heart, 'Aorta', [0.0, 3.08, -0.42], 55, 68);
-  labels.add('exterior', heart, 'Pulmonary trunk', [0.02, 2.5, 0.34], 12, 96);
+  labels.add('exterior', heart, 'Aorta', [0.12, 3.16, -0.4], 55, 68);
+  labels.add('exterior', heart, 'Pulmonary trunk', [0.02, 2.15, 0.62], 12, 96);
   labels.add('exterior', heart, 'Superior vena cava', [-1.0, 3.02, -0.24], 128, 64);
   labels.add('exterior', heart, 'Right atrium', [-0.9, 2.08, 0.3], 40, 104);
   labels.add('exterior', heart, 'Right ventricle', surfRV(0.44, 104), 20, 150);
@@ -1186,9 +1186,9 @@ export function buildHeart({ scene }) {
 
   // anchored INSIDE the two cut faces, which is the only place the ratio is
   // actually visible — mid-wall at the LV's cut (180deg) and the RV's (170deg)
-  labels.add('walls', heart, 'Left ventricle wall — 10 mm', surfLV(1, 330, -0.092), 18, 96);
-  labels.add('walls', heart, 'Right ventricle wall — 3 mm', surfRV(1, 200, -0.035), 6, 152);
-  labels.add('walls', heart, 'Septum — the LV wall doing double duty', surfLV(1, 170, -0.092), 62, 104);
+  labels.add('walls', heart, 'Left ventricle wall — 10 mm', proud(surfLV(1, 330, -0.092)), 18, 96);
+  labels.add('walls', heart, 'Right ventricle wall — 3 mm', proud(surfRV(1, 200, -0.035)), 6, 152);
+  labels.add('walls', heart, 'Septum — the LV wall doing double duty', proud(surfLV(1, 170, -0.092)), 62, 104);
 
   labels.add('valves', heart, 'Tricuspid — 3 flaps', [AN_T[0], PLATE_Y + 0.02, AN_T[1]], 24, 128);
   labels.add('valves', heart, 'Mitral — 2 flaps', [AN_M[0], PLATE_Y + 0.02, AN_M[1]], 12, 80);
@@ -1197,7 +1197,7 @@ export function buildHeart({ scene }) {
 
   labels.add('chordae', heart, 'Mitral leaflet', [AN_M[0] + 0.1, PLATE_Y - 0.3, AN_M[1] + 0.1], 30, 82);
   labels.add('chordae', heart, 'Chordae tendineae', lvCavPt(0.62, 20, 0.62), 8, 76);
-  labels.add('chordae', heart, 'Papillary muscle', lvCavPt(0.4, 40, 0.62), 336, 84);
+  labels.add('chordae', heart, 'Papillary muscle', lvCavPt(0.46, 42, 0.7), 340, 92);
 
   labels.add('wiring', heart, 'SA node — the pacemaker', saPos, 20, 152);
   labels.add('wiring', heart, 'AV node — the 0.1 s stall', avPos, 35, 114);
@@ -1221,6 +1221,12 @@ export function buildHeart({ scene }) {
     top: 1,
     cor: 0,
     spin: 0,
+  };
+  const showGroup = (g, v) => {
+    g.visible = v;
+    g.traverse((o) => {
+      if (o.isMesh) o.visible = v;
+    });
   };
   const UP = new THREE.Vector3(0, 1, 0);
   const tmpA = new THREE.Vector3();
@@ -1275,30 +1281,23 @@ export function buildHeart({ scene }) {
       });
     }
 
-    // the anterior half-shell: solid, a ghosted outline, or gone
+    // Hiding a GROUP leaves every mesh under it with `visible === true`, and
+    // the callout declutter pass collects occluders per MESH — so an atrium or
+    // an aorta that has been lifted out of the scene still casts occlusion fade
+    // over every label behind it. Push the flag all the way down. Order
+    // matters: broad groups first, the narrower overrides after.
     const lo = clamp01(state.lid);
-    const ghosted = lo < 0.995;
-    lidMats.forEach((m, i) => {
-      m.opacity = lo;
-      m.transparent = ghosted;
-      m.depthWrite = !ghosted;
-      // clearcoat renders at full strength regardless of opacity — zero it or
-      // a "ghosted" shell still reads as solid lacquer
-      m.clearcoat = lidBaseCoat[i] * lo;
-      m.sheen = ghosted ? 0 : 0.5;
-    });
-    lid.visible = lo > 0.02;
-
     const revealed = state.reveal > 0.5;
-    interior.visible = revealed;
-    atriaGroup.visible = state.atria > 0.5;
-    for (const g of vesselHide) g.visible = state.vess > 0.5;
-    mount.visible = !revealed;
-    topGroup.visible = state.top > 0.5;
-    plateGroup.visible = state.top > 0.5;
+    showGroup(lid, lo > 0.5);
+    showGroup(interior, revealed);
+    showGroup(atriaGroup, state.atria > 0.5);
+    for (const g of vesselHide) showGroup(g, state.vess > 0.5);
+    showGroup(mount, !revealed);
+    showGroup(topGroup, revealed && state.top > 0.5);
+    showGroup(plateGroup, state.top > 0.5);
     // the surface plumbing and its fat come off for the short-axis slice, so
     // nothing crosses the one face the wall ratio is read from
-    coronaries.visible = lo > 0.02 && state.top > 0.5;
+    showGroup(coronaries, lo > 0.5 && state.top > 0.5);
 
     // great vessels go translucent only while blood is being traced through them
     const x = clamp01(state.xray);
@@ -1312,7 +1311,7 @@ export function buildHeart({ scene }) {
     // on an identical frame. Off-phase legs dim rather than vanish — the veins
     // never actually stop, they just stop being pushed.
     const f = clamp01(state.flow);
-    bloodGroup.visible = f > 0.01;
+    showGroup(bloodGroup, f > 0.01);
     if (f > 0.01) {
       for (const s of streams) {
         const g = s.gate ? 0.14 + 0.86 * s.gate(b) : 1;
@@ -1326,7 +1325,7 @@ export function buildHeart({ scene }) {
 
     // coronary flow: the muscle's own supply, throttled by its own squeeze
     const cf = clamp01(state.cor);
-    corGroup.visible = cf > 0.01;
+    showGroup(corGroup, cf > 0.01);
     const perfusion = 0.12 + 0.88 * (1 - squeeze);
     matCoronary.emissive.copy(corLit);
     matCoronary.emissiveIntensity = cf * perfusion * 0.5;
@@ -1343,7 +1342,7 @@ export function buildHeart({ scene }) {
 
     // the wiring, lit segment by segment in the order it actually fires
     const w = clamp01(state.wire);
-    wiring.visible = w > 0.01 && revealed;
+    showGroup(wiring, w > 0.01 && revealed);
     if (wiring.visible)
       for (const seg of wireSegs) {
       const lit = ramp(b, seg.on, seg.on + 0.02) * (1 - ramp(b, seg.off, seg.off + 0.05));
