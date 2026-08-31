@@ -154,26 +154,97 @@ function qaHtml(heading, items) {
 // explainer today because the defineExplainer API always writes heading
 // first (see README's authoring example). A step written any other way
 // still fails loudly below rather than silently shipping wrong copy.
-function readSteps(id) {
+//
+// index.js itself is only ever read as text (importing it would pull in the
+// Vite-only registry glob and kill the lazy chunk split — see the header).
+// A step body MAY however interpolate `${…}` from a PURE sibling data module
+// (google-maps/graph.js computes its own settle counts by running the real
+// algorithms); those specific modules are safe to import, so readSteps()
+// resolves the interpolation by importing just them. model.js is still
+// off-limits (it pulls three.js).
+const COPY_MODULE_DENYLIST = new Set(['index.js', 'model.js']);
+
+// Parse `import * as G from './graph.js'` / `import { a, b as c } from './x.js'`
+// / `import D from './x.js'` — relative siblings only, .js only, denylist
+// applied. Returns local name -> { file, kind, imported }.
+function importedBindings(src) {
+  const map = new Map();
+  const re =
+    /import\s+(?:(\*\s*as\s+[A-Za-z_$][\w$]*)|(\{[^}]*\})|([A-Za-z_$][\w$]*))\s+from\s+(['"])(\.\/[^'"]+)\4/g;
+  for (const m of src.matchAll(re)) {
+    const [, ns, named, def, , spec] = m;
+    const file = spec.replace(/^\.\//, '');
+    if (!file.endsWith('.js') || COPY_MODULE_DENYLIST.has(file)) continue;
+    if (ns) {
+      map.set(ns.replace(/\*\s*as\s+/, '').trim(), { file, kind: 'ns' });
+    } else if (named) {
+      for (const part of named.slice(1, -1).split(',')) {
+        const mm = part.trim().match(/^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+        if (mm) map.set(mm[2] || mm[1], { file, kind: 'named', imported: mm[1] });
+      }
+    } else if (def) {
+      map.set(def, { file, kind: 'default' });
+    }
+  }
+  return map;
+}
+
+const _siblingCache = new Map();
+function importSibling(id, file) {
+  const key = `${id}/${file}`;
+  if (!_siblingCache.has(key)) {
+    _siblingCache.set(key, import(pathToFileURL(join(EXPLAINERS_DIR, id, file)).href));
+  }
+  return _siblingCache.get(key);
+}
+
+// Resolve a step string that uses `${…}` interpolation. Only identifiers
+// bound to a pure sibling data module can be resolved; anything else throws
+// the loud error so wrong copy never ships silently.
+async function resolveInterpolated(id, raw, bindings) {
+  const refs = [...raw.matchAll(/\$\{([^}]+)\}/g)].map((m) => m[1]);
+  const roots = new Set();
+  for (const expr of refs) {
+    // leading identifier of each dotted path (skip anything after a `.`)
+    for (const r of expr.matchAll(/(?:^|[^.\w$])([A-Za-z_$][\w$]*)/g)) roots.add(r[1]);
+  }
+  const names = [];
+  const values = [];
+  for (const name of roots) {
+    if (['true', 'false', 'null', 'undefined', 'Math', 'Number', 'String'].includes(name)) continue;
+    const b = bindings.get(name);
+    if (!b) {
+      throw new Error(
+        `${id}/index.js: step text interpolates \${${refs.join('}, ${')}} but "${name}" is ` +
+          `not imported from a pure sibling data module — rewrite that step as a plain ` +
+          `string, or move the value into a data-only module and import it.`,
+      );
+    }
+    const mod = await importSibling(id, b.file);
+    names.push(name);
+    values.push(b.kind === 'ns' ? mod : b.kind === 'default' ? mod.default : mod[b.imported]);
+  }
+  // eslint-disable-next-line no-new-func
+  const out = new Function(...names, `return \`${raw}\`;`)(...values);
+  return String(out).replace(/\s+/g, ' ').trim();
+}
+
+async function readSteps(id) {
   const src = readFileSync(join(EXPLAINERS_DIR, id, 'index.js'), 'utf8');
+  const bindings = importedBindings(src);
   const re = /\b(heading|body|hint)\s*:\s*(['"`])((?:\\.|(?!\2)[\s\S])*)\2/g;
   const steps = [];
   let cur = null;
   for (const m of src.matchAll(re)) {
     const [, key, , raw] = m;
-    if (raw.includes('${')) {
-      throw new Error(
-        `${id}/index.js: step ${key} uses template interpolation ("\${…}") — ` +
-          `prerender.mjs reads step text statically and can't resolve it. ` +
-          `Rewrite as a plain string, or teach readSteps() about this case.`,
-      );
-    }
-    const text = raw
-      .replace(/\\'/g, "'")
-      .replace(/\\"/g, '"')
-      .replace(/\\`/g, '`')
-      .replace(/\\n/g, ' ')
-      .trim();
+    const text = raw.includes('${')
+      ? await resolveInterpolated(id, raw, bindings)
+      : raw
+          .replace(/\\'/g, "'")
+          .replace(/\\"/g, '"')
+          .replace(/\\`/g, '`')
+          .replace(/\\n/g, ' ')
+          .trim();
     if (key === 'heading') {
       cur = { heading: text, body: '', hint: '' };
       steps.push(cur);
@@ -247,7 +318,7 @@ async function explainerBody(meta) {
       › <span>${esc(meta.title)}</span>
     </nav>`;
 
-  const steps = readSteps(meta.id);
+  const steps = await readSteps(meta.id);
   // Index badge stays a separate element from the heading text — some step
   // headings already carry their own number ("1 · Suck"), and concatenating
   // a second one ("02 · 1 · Suck") double-counts. Mirrors the live player's
