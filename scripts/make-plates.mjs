@@ -39,6 +39,22 @@ const OUT = 'public/plates';
 // later step frames better WITHOUT changing the in-app camera, pin it here —
 // otherwise a plain `make-plates.mjs` run silently reverts the fix.
 const OVERRIDES = {
+  // step 1 sits the whole machine in the right-hand third - correct in the app,
+  // where the text panel owns the left, but it leaves the card half empty.
+  // Step 8 is the same sealed, running machine framed wider: aluminium snail,
+  // cast-iron snail and the shaft between them, legible as a turbo at card size.
+  turbocharger: { step: 8 },
+  // step 1 is the sealed case, and at card size a dull aluminium cylinder could
+  // be a muffler or an air tank - there is no machine visible in it at all.
+  // Step 2 lifts the case off and shows the whole nested train in one shot:
+  // converter, the two clutch drums, both planetary sets and the copper output
+  // shaft, each member in its own tint, legible as a gearbox at thumbnail size.
+  'automatic-transmission': { step: 2 },
+  // step 1 is a sealed metal tile, and shrunk to a card it is a featureless
+  // silver rectangle that could be a laptop or a box. Step 3 floats the lid
+  // off the die: silver lid, green substrate, colour-coded floorplan — read
+  // as "a CPU, opened" at thumbnail size.
+  cpu: { step: 3 },
   // step 1 is the right opening beat but the wrong card: a shut stainless box
   // is a white rectangle that could be an oven, a fridge or a cupboard. Step 2
   // drops the door and rolls the racks out — plates, glasses and the dispenser,

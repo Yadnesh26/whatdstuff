@@ -210,6 +210,21 @@ for (let i = 0; i < stepCount; i++) {
   }, i);
   await page.waitForTimeout(200); // let scroll paint before polling starts
   await waitForCameraSettle(page); // camera fly-to settles (race-tolerant)
+  // ...then wait for a REAL animation frame. Headless Chromium throttles rAF
+  // to a crawl, so the stage's loop can be seconds behind even once the fly-to
+  // tween has finished: camera.matrixWorld still holds the PREVIOUS step's
+  // pose, and the CSS2D pass + declutter have not repositioned a single pill.
+  // Measuring that state reported perfectly-placed labels as half-buried under
+  // the panel (wind-turbine step 5, diagnosed 2026-08-31 — one frame moved the
+  // anchor 500px and flipped the pill back to the clear side). Capped, so a
+  // fully stalled loop still falls through to the probe's own render call.
+  await page.evaluate(
+    () =>
+      new Promise((res) => {
+        requestAnimationFrame(() => res());
+        setTimeout(res, 1500);
+      }),
+  );
   const res = await page.evaluate(([activeIdx, obscureMax]) => {
     const stage = window.__hiw.stage;
     stage.composer ? stage.composer.render() : stage.renderer.render(stage.scene, stage.camera);
@@ -380,7 +395,11 @@ gate(
     });
 
   try {
-    await mob.goto(`http://localhost:${port}/#/${id}`);
+    // 'load' (the default) waits on every subresource and intermittently never
+    // fires on this second page — the same two-pages-one-browser flakiness the
+    // note below documents. Boot is polled explicitly a few lines down, so
+    // domcontentloaded is all this navigation actually needs.
+    await mob.goto(`http://localhost:${port}/#/${id}`, { waitUntil: 'domcontentloaded' });
     // Deliberately NOT page.waitForFunction here. On this second page of the
     // browser its polling never resolves even when the predicate is already
     // true — verified directly: waitForFunction timed out while an immediate
