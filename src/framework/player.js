@@ -126,6 +126,12 @@ export function mountExplainer(def, container) {
 
   window.__hiw.stepRuntimes = stepRuntimes;
   window.__hiw.activate = (i) => activate(i); // deterministic driving for video export
+  // exposes the SAME animate()-based camera move activate() itself uses (so a
+  // second call here cleanly supersedes an in-flight one — anime.js replaces
+  // a tween targeting the same object+properties rather than composing with
+  // it) — lets export-video.mjs re-aim a shot's camera without duplicating
+  // flyTo's dolly/frameForViewport logic
+  window.__hiw.flyTo = (pose) => flyTo(pose);
 
   // --- step activation (camera, rail, panels, loop start/stop) -----------
   let activeIndex = -1;

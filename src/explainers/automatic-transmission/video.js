@@ -19,7 +19,8 @@ export default {
       {
         // Zone 1 — hook: matches the full sealed model, establishing shot
         step: 0,
-        dolly: 2.6,
+        dolly: 1,
+        camera: { position: [8.98, 4.4, 7.81], target: [0.07, 1.35, 0.15] },
         caption: 'This transmission has no clutch pedal.',
         narration:
           'This transmission has no clutch pedal, no lever, not even a stick you’d recognize — it shifts three gears with a doughnut of spinning oil.',
@@ -27,7 +28,8 @@ export default {
       {
         // Zone 2+3 — stakes + planted detail, then the spoken question
         step: 1,
-        dolly: 2.2,
+        dolly: 1,
+        camera: { position: [-8.5, 4.6, 8.1], target: [0.07, 1.35, 0.15] },
         caption: 'So how does spinning oil replace a clutch?',
         narration:
           'Crack the case open and there’s no gearstick in here — just two gear sets on one shaft, and oil deciding which part gets clamped still. So how does spinning fluid replace a clutch?',
@@ -35,7 +37,8 @@ export default {
       {
         // Zone 4a — reveal: name the converter
         step: 2,
-        dolly: 1.75,
+        dolly: 1,
+        camera: { position: [-2.556, 2.36, 3.95], target: [-0.986, 1.32, 0.19] },
         labels: ['Impeller — engine side', 'Turbine — gearbox side'],
         caption: 'It starts in the torque converter',
         narration:
@@ -44,7 +47,8 @@ export default {
       {
         // Zone 4b — the stator, connective handoff
         step: 2,
-        dolly: 1.75,
+        dolly: 1,
+        camera: { position: [-2.556, 2.36, 3.95], target: [-0.986, 1.32, 0.19] },
         labels: ['Stator'],
         caption: 'The stator turns the oil around',
         narration:
@@ -53,7 +57,8 @@ export default {
       {
         // Zone 4c — THEREFORE: the planetary trick
         step: 4,
-        dolly: 1.6,
+        dolly: 1,
+        camera: { position: [4.085, 2.897, 2.825], target: [0.13, 1.35, 0.02] },
         labels: ['Sun gear · 36 teeth', 'Planet carrier', 'Ring gear · 72 teeth'],
         caption: 'One gear set, three different answers',
         narration:
@@ -62,7 +67,8 @@ export default {
       {
         // Zone 5 — isolated stat, its own beat
         step: 7,
-        dolly: 1.65,
+        dolly: 1,
+        camera: { position: [3.124, 3.744, 7.117], target: [0.35, 1.35, 0.05] },
         labels: ['Sun', 'Rear carrier', 'Output'],
         caption: 'One ratio makes every gear — even reverse',
         narration:

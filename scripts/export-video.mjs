@@ -299,6 +299,26 @@ for (const [si, shot] of shots.entries()) {
   await setDolly(shot.dolly ?? baseDolly);
   await page.evaluate((n) => window.__hiw.activate(n), shot.step);
 
+  // Per-shot camera override (OPT-IN via `camera: {position, target}` in
+  // video.js): re-aims the shot past whatever the step's own authored camera
+  // is. Exists because desktop step cameras are composed rule-of-thirds for
+  // the text panel (subject pushed into the right ~62%) — correct on the
+  // interactive site, but there is no side panel in a vertical export, so the
+  // same pose reads as cropped/off-center in portrait. `dolly` alone can't
+  // fix a case like this: it scales distance from `target`, which shrinks
+  // the OFFSET too (target always projects to frame-center), but only by
+  // dollying out far enough to lose the shot's intended macro framing.
+  // Calling flyTo() again here is safe and not a second animation stacking
+  // on the first — anime.js REPLACES a tween targeting the same
+  // object+properties rather than composing with it (the same thing that
+  // already happens on the live site when a user scrolls past a step fast
+  // enough to retrigger flyTo before the previous one finishes). Runs even
+  // when activate() was a no-op (two shots sharing a step), same reasoning
+  // as the labels override below.
+  if (shot.camera) {
+    await page.evaluate((pose) => window.__hiw.flyTo(pose), shot.camera);
+  }
+
   // Per-shot label targeting (OPT-IN via `labels: [...]` in video.js): show
   // only the named callouts while THIS shot's narration is on screen, so a
   // label appears while the narrator is actually talking about that part
