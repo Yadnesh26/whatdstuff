@@ -232,6 +232,7 @@ export function createStage(container, options = {}) {
   floor.receiveShadow = true;
   floor.visible = !space;
   floor.userData.noOcclude = true; // shadow-only plane — must never fade a label
+  floor.userData.stageChrome = true; // ...and never counts as subject when framing
   scene.add(floor);
 
   // soft radial contact shadow under the model — grounds it beyond what the
@@ -259,6 +260,7 @@ export function createStage(container, options = {}) {
   contact.position.y = 0.002;
   contact.visible = !space;
   contact.userData.noOcclude = true; // decorative ground blob, same reason as floor
+  contact.userData.stageChrome = true;
   scene.add(contact);
 
   // --- post-processing: AO grounds the parts, bloom lets emissives glow ----

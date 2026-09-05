@@ -132,6 +132,26 @@ export function mountExplainer(def, container) {
   // it) — lets export-video.mjs re-aim a shot's camera without duplicating
   // flyTo's dolly/frameForViewport logic
   window.__hiw.flyTo = (pose) => flyTo(pose);
+  // Auto-framing for video export: solve a pose that centres and fills the
+  // frame with the named parts, fly to it, and refocus DoF at the distance
+  // actually used. Returns the solved pose so the exporter can log and gate on
+  // it. See frameSubject() below for why `dolly` alone could never do this.
+  window.__hiw.frameSubject = (opts) => frameSubject(opts);
+  window.__hiw.frameTo = (opts = {}) => {
+    const pose = frameSubject(opts);
+    flyTo(pose);
+    applyDof(pose, opts.aperture);
+    return pose;
+  };
+  // Where the subject lands on screen for a given pose — the framing gate's
+  // measurement, and what the storyboard sheet annotates each shot with.
+  window.__hiw.projectSubject = (o) => projectSubject(o);
+  // World-space bounds of the same subject, for tooling that wants the box
+  // itself rather than its projection.
+  window.__hiw.subjectBox = (keys) => {
+    const box = subjectBoxFor(keys);
+    return box ? { min: box.min.toArray(), max: box.max.toArray() } : null;
+  };
 
   // --- step activation (camera, rail, panels, loop start/stop) -----------
   let activeIndex = -1;
@@ -202,6 +222,247 @@ export function mountExplainer(def, container) {
       duration: 1300,
       ease: 'inOutQuad',
     });
+  }
+
+  // --- subject framing (video export) --------------------------------------
+  // Solves a camera pose that CENTRES and FILLS the frame with the parts a shot
+  // is actually about, instead of leaning on a hand-guessed `dolly` scalar.
+  //
+  // Why it has to exist: `frameForViewport` above — the phone correction — is
+  // switched off during a video export (stage.js's isExportRender() gate), so
+  // exports had only `__hiwCameraScale`. That scales the camera away from
+  // `target` along the view axis, and because `target` ALWAYS projects to frame
+  // centre it shrinks the subject and its off-centre offset by the same factor:
+  // it can zoom out until a crop stops hurting, but it can never recentre.
+  // Hand-authored per-shot camera poses were the workaround; this is the fix.
+  //
+  // Export-only by construction — nothing on the interactive site calls it.
+
+  // Union the world bounds of everything VISIBLE under `root`. Box3's own
+  // setFromObject cannot be used here: it walks invisible descendants too, so a
+  // cutaway step's hidden shell would still inflate the box and push the camera
+  // back to fit geometry the viewer cannot see.
+  function expandVisible(box, root) {
+    if (!root?.visible) return;
+    root.updateWorldMatrix(true, true);
+    const p = new THREE.Vector3();
+    const b = new THREE.Box3();
+    root.traverseVisible((o) => {
+      if (o.userData?.stageChrome) return; // floor + contact shadow, never subject
+      if (o.isCSS2DObject) {
+        box.expandByPoint(p.setFromMatrixPosition(o.matrixWorld));
+        return;
+      }
+      const g = o.geometry;
+      if (!g) return;
+      if (!g.boundingBox) g.computeBoundingBox();
+      if (!g.boundingBox) return;
+      box.union(b.copy(g.boundingBox).applyMatrix4(o.matrixWorld));
+    });
+  }
+
+  // What a shot is "about": the named callouts' parent parts when keys are
+  // given, else the whole model. A callout is added to the part it labels, so
+  // its parent IS the subject — which means `focus: [...]`, already authored on
+  // most steps, doubles as a framing target with no new authoring.
+  function subjectRoots(keys) {
+    const wanted = new Set(keys == null ? [] : Array.isArray(keys) ? keys : [keys]);
+    const roots = [];
+    if (wanted.size) {
+      stage.scene.traverse((o) => {
+        if (!o.isCSS2DObject || !o.element?.classList.contains('callout')) return;
+        const text = o.element.querySelector('.callout-text')?.textContent ?? '';
+        if (!wanted.has(o.element.dataset.key) && !wanted.has(text)) return;
+        // A callout parented straight to the model root would frame the ENTIRE
+        // model, which is never what naming one part means. Fall back to the
+        // callout's own anchor point in that case.
+        const parent = o.parent;
+        roots.push(parent && parent !== stage.scene && parent !== handles.group ? parent : o);
+      });
+    }
+    return roots.length ? roots : [handles.group ?? stage.scene];
+  }
+
+  // `keys === undefined` means "whatever the active step says it is about";
+  // `null` means the whole model. Both callers below want the same rule.
+  function subjectBoxFor(keys) {
+    const wanted = keys === undefined ? def.steps[activeIndex]?.focus : keys;
+    const box = new THREE.Box3().makeEmpty();
+    for (const r of subjectRoots(wanted)) expandVisible(box, r);
+    return box.isEmpty() ? null : box;
+  }
+
+  // Project a world box through a pose and return its screen rect in normalised
+  // device coordinates (-1..1 on both axes). Measured on a CLONE of the camera,
+  // so this can run mid-render without disturbing the frame being captured.
+  const _pv = new THREE.Vector3();
+  const _pw = new THREE.Vector3();
+  function projectBoxThrough(box, { position, target }, scale = 1) {
+    const cam = stage.camera;
+    const t = new THREE.Vector3().fromArray(target);
+    const p = new THREE.Vector3().fromArray(position).sub(t).multiplyScalar(scale).add(t);
+    const probe = cam.clone();
+    probe.position.copy(p);
+    probe.up.copy(cam.up);
+    probe.lookAt(t);
+    probe.updateMatrixWorld(true);
+    probe.updateProjectionMatrix();
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let behind = false;
+    for (let i = 0; i < 8; i++) {
+      _pv.set(
+        i & 1 ? box.max.x : box.min.x,
+        i & 2 ? box.max.y : box.min.y,
+        i & 4 ? box.max.z : box.min.z,
+      );
+      // Camera-space z FIRST: a corner behind the lens gets mirrored by
+      // project() and would silently produce nonsense bounds that read as a
+      // perfectly framed shot.
+      _pw.copy(_pv).applyMatrix4(probe.matrixWorldInverse);
+      if (_pw.z > -1e-4) behind = true;
+      _pv.project(probe);
+      minX = Math.min(minX, _pv.x);
+      maxX = Math.max(maxX, _pv.x);
+      minY = Math.min(minY, _pv.y);
+      maxY = Math.max(maxY, _pv.y);
+    }
+    return {
+      min: [minX, minY],
+      max: [maxX, maxY],
+      coverW: (maxX - minX) / 2, // fraction of the FULL frame width
+      coverH: (maxY - minY) / 2,
+      centre: [(minX + maxX) / 2, (minY + maxY) / 2],
+      cropped: behind || minX < -1 || maxX > 1 || minY < -1 || maxY > 1,
+    };
+  }
+
+  // Returns { position, target } — never mutates anything.
+  //   keys  parts to frame (callout keys/text). OMITTED falls back to the active
+  //         step's own `focus` list — already authored on most steps, and already
+  //         means "what this step is about". Pass null for the whole model.
+  //   fill  fraction of the frame the subject should occupy: a number for both
+  //         axes, or { w, h } to let them differ (see below)
+  //   bias  slide the subject UP by this fraction of frame height, to clear a
+  //         burned caption rail along the bottom
+  //   pose  the pose whose VIEWING ANGLE to keep (defaults to the live camera)
+  function frameSubject({ keys, fill, bias = 0, pose } = {}) {
+    const cam = stage.camera;
+    const base = pose ?? {
+      position: cam.position.toArray(),
+      target: stage.controls.target.toArray(),
+    };
+    const box = subjectBoxFor(keys);
+    if (!box) return base;
+
+    const centre = box.getCenter(new THREE.Vector3());
+    const from = new THREE.Vector3().fromArray(base.position);
+    const to = new THREE.Vector3().fromArray(base.target);
+    const dir = new THREE.Vector3().subVectors(to, from);
+    if (dir.lengthSq() < 1e-9) return base;
+    dir.normalize();
+
+    // Camera-space basis for the AUTHORED viewing angle. The solve changes only
+    // distance and centring — never the angle the pose was composed at.
+    // A pose looking straight down would make dir parallel to cam.up and
+    // collapse the cross product, so pick a different reference axis there.
+    const upRef =
+      Math.abs(dir.dot(cam.up)) > 0.999 ? new THREE.Vector3(0, 0, 1) : cam.up;
+    const right = new THREE.Vector3().crossVectors(dir, upRef).normalize();
+    const up = new THREE.Vector3().crossVectors(right, dir).normalize();
+
+    let halfW = 0;
+    let halfH = 0;
+    let halfD = 0;
+    const c = new THREE.Vector3();
+    for (let i = 0; i < 8; i++) {
+      c.set(
+        i & 1 ? box.max.x : box.min.x,
+        i & 2 ? box.max.y : box.min.y,
+        i & 4 ? box.max.z : box.min.z,
+      ).sub(centre);
+      halfW = Math.max(halfW, Math.abs(c.dot(right)));
+      halfH = Math.max(halfH, Math.abs(c.dot(up)));
+      halfD = Math.max(halfD, Math.abs(c.dot(dir)));
+    }
+
+    // `fill` is the fraction of the frame the subject should occupy, per axis.
+    // A single number means both axes; { w, h } lets them differ, which matters
+    // in portrait: a long horizontal machine (a transmission is ~4.3 units wide
+    // and ~2 tall) fitted to 82% of a 9:16 WIDTH ends up occupying 25% of the
+    // height and reads as a speck. Allowing width close to the frame edge while
+    // capping height is what a human composing the same shot does by hand.
+    const clampF = (v) => Math.max(0.05, Math.min(2, v));
+    const fw = clampF((typeof fill === 'object' && fill ? fill.w : fill) ?? 0.8);
+    const fh = clampF((typeof fill === 'object' && fill ? fill.h : fill) ?? 0.8);
+    const tanV = Math.tan((cam.fov * Math.PI) / 360);
+    const tanH = tanV * (cam.aspect || REF_ASPECT);
+
+    // Analytic first guess. The + halfD is why it is only a guess: the near face
+    // of a deep subject projects larger than its centre plane, but adding the
+    // whole half-depth over-corrects whenever the widest corner is not on that
+    // near face — measured at ~12 points of lost fill on this library's models.
+    let dist = Math.max(halfH / (tanV * fh), halfW / (tanH * fw)) + halfD;
+
+    // ...so refine by MEASURING. Coverage falls off as ~1/distance, which makes
+    // `dist *= worst-axis overshoot` a contraction that settles in 2-3 rounds;
+    // the loop is capped and the step clamped so a pathological box can never
+    // spin here or fling the camera into the model.
+    const poseAt = (d) => {
+      const t = centre.clone();
+      return { position: t.clone().addScaledVector(dir, -d).toArray(), target: t.toArray() };
+    };
+    for (let iter = 0; iter < 6; iter++) {
+      const pr = projectBoxThrough(box, poseAt(dist));
+      if (pr.cropped && pr.coverW <= 0) break;
+      const overshoot = Math.max(pr.coverW / fw, pr.coverH / fh);
+      if (!Number.isFinite(overshoot) || overshoot <= 0) break;
+      if (Math.abs(overshoot - 1) < 0.005) break;
+      dist *= Math.max(0.5, Math.min(2, overshoot));
+    }
+    // never end up inside the subject
+    dist = Math.max(dist, halfD * 1.05 + 0.01);
+
+    // Translate position AND target together — the same trick the mobile `lift`
+    // uses — so composition moves and the viewing angle does not.
+    const lift = bias * dist * tanV * 2;
+    const t = centre.clone().addScaledVector(up, -lift);
+    const p = t.clone().addScaledVector(dir, -dist);
+    return { position: p.toArray(), target: t.toArray() };
+  }
+
+  // Where a shot's subject lands on screen — the framing gate's measurement,
+  // and what the storyboard sheet annotates each shot with.
+  function projectSubject({ pose, keys } = {}) {
+    const box = subjectBoxFor(keys);
+    if (!box) return null;
+    const cam = stage.camera;
+    const base = pose ?? {
+      position: cam.position.toArray(),
+      target: stage.controls.target.toArray(),
+    };
+    // The export's dolly scalar has to be folded in by hand: flyTo applies it
+    // after the pose is handed over, so the pose alone is not where the camera
+    // actually ends up.
+    return projectBoxThrough(box, base, window.__hiwCameraScale ?? 1);
+  }
+
+  // Focus the DoF pass at the distance of the pose actually flown to. activate()
+  // does this for authored step poses; the export needs it again after a solved
+  // pose, or the subject is focused at the wrong distance on every reframed shot.
+  function applyDof({ position, target }, aperture) {
+    if (!stage.bokehPass) return;
+    const s = window.__hiwCameraScale ?? 1;
+    const d = Math.hypot(
+      (position[0] - target[0]) * s,
+      (position[1] - target[1]) * s,
+      (position[2] - target[2]) * s,
+    );
+    stage.bokehPass.uniforms.focus.value = d;
+    if (aperture != null) stage.bokehPass.uniforms.aperture.value = aperture;
   }
 
   function activate(i) {

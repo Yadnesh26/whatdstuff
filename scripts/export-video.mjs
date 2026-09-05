@@ -2,6 +2,8 @@
 //
 //   node scripts/export-video.mjs <explainer-id> [--format short|long] [--port 5199]
 //                                 [--fps 30] [--out renders] [--keep-frames]
+//                                 [--captions] [--endcard] [--no-auto-frame]
+//                                 [--fill 0.88] [--force-frames]
 //
 // How it works: every animation in the app (anime.js engine, three's
 // setAnimationLoop, camera fly-tos) is driven by requestAnimationFrame +
@@ -11,19 +13,35 @@
 //
 // The shot list comes from src/explainers/<id>/video.js (editorial layer:
 // which steps, how long, captions, narration). Falls back to "every step,
-// 8s each" when video.js doesn't exist yet.
+// 8s each" when video.js doesn't exist yet. Options default from that file's
+// `render` block; a CLI flag always wins over it.
+//
+// AUTO-FRAMING (default on): each shot's camera is solved from the subject's
+// real world bounds — player.js frameSubject() — instead of the old guessed
+// `dolly` scalar, which could zoom out but never recentre. `--no-auto-frame`
+// reproduces a pre-solver render.
+//
+// The run is in two halves. This file captures frames and encodes the silent
+// master; finish-video.mjs burns captions/overlays and mixes audio. The master
+// is CACHED against a hash of its real inputs, so re-cutting captions or
+// re-recording narration of the same length skips frame capture entirely.
 //
 // Output (renders/<id>/):
 //   <format>-master.mp4    silent, no captions — the reusable master
+//   <format>-master.hash   cache key for the above
+//   <format>-render.json   viewport/duration/audio offsets, for finish-video
 //   <format>-captioned.mp4 captions burned in (skipped if no captions)
 //   <format>-final.mp4     captioned + narration/sfx mixed (skipped if no audio)
 //   <format>-timeline.json shot → [start,end] seconds, for audio/caption sync
 import { chromium } from 'playwright';
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
+import { finishVideo } from './finish-video.mjs';
+import { DEFAULT_PRESET } from './caption-style.mjs';
 
 const require = createRequire(import.meta.url);
 const ffmpeg = require('ffmpeg-static');
@@ -35,22 +53,15 @@ const opt = (name, dflt) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : dflt;
 };
+const flag = (name) => args.includes(`--${name}`);
 if (!id) {
   console.error('usage: node scripts/export-video.mjs <explainer-id> [--format short|long] [--port 5199] [--fps 30]');
   process.exit(1);
 }
-const format = opt('format', 'long'); // short = 9:16 vertical, long = 16:9
-const port = opt('port', '5199');
-const fps = Number(opt('fps', '24')); // 24 = cinematic and 20% fewer frames
-const outRoot = resolve(opt('out', 'renders'), id);
-const keepFrames = args.includes('--keep-frames');
-
-const viewport =
-  format === 'short'
-    ? { width: 1080, height: 1920 }
-    : { width: 1920, height: 1080 };
 
 // --- editorial layer (video.js) -----------------------------------------
+// Loaded BEFORE options are resolved: the `render` block inside it supplies
+// their defaults (see below), so it cannot wait until after them.
 const videoJsPath = resolve(`src/explainers/${id}/video.js`);
 let editorial = null;
 if (existsSync(videoJsPath)) {
@@ -60,59 +71,173 @@ if (existsSync(videoJsPath)) {
   console.log('editorial: none (video.js missing) — rendering every step, 8s each');
 }
 
-// --- brand overlays: title card + end card --------------------------------
-// The name comes from meta.js (single source of truth for the library card),
-// compacted for screen: "How a Refrigerator Works" -> "REFRIGERATOR". A short
-// series-brand word reads at a glance; the full sentence does not. video.js can
-// override with `titleCard` when the derived form is wrong.
-// Also strips the "What Is a Black Hole?" form, used by subjects that aren't
-// machines — same intent, and the title card still wants just "BLACK HOLE".
-const compactTitle = (t) =>
-  t
-    .replace(/^(?:how|what)\s+(?:is\s+|are\s+)?(?:(?:a|an|the)\s+)?/i, '')
-    .replace(/\s+works?[.!]?$/i, '')
-    .replace(/\?$/, '')
-    .trim();
+// --- render config -------------------------------------------------------
+// Precedence, always: an explicit CLI flag > the explainer's committed
+// `render` block in video.js > the built-in default. The config exists so a
+// re-render is reproducible from the repo alone instead of from shell history
+// — see docs/video-pipeline-plan.md §4.
+//
+// Fields may be a plain value or { short, long }; fmtCfg picks this format's.
+const cfg = editorial?.render ?? {};
+const format = opt('format', cfg.defaultFormat ?? 'long'); // short = 9:16, long = 16:9
+const fmtCfg = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v[format] : v);
+// A --no-<name> flag always wins over a config `true`, so a committed config
+// can be overridden downward for one run without editing the file.
+const tri = (name, configured, dflt) =>
+  flag(`no-${name}`) ? false : flag(name) ? true : (configured ?? dflt);
+
+const port = opt('port', String(cfg.port ?? 5199));
+const fps = Number(opt('fps', String(cfg.fps ?? 24))); // 24 = cinematic and 20% fewer frames
+const outRoot = resolve(opt('out', 'renders'), id);
+const keepFrames = flag('keep-frames');
+
+// AUTO-FRAMING (default ON). The exporter solves each shot's camera from the
+// subject's real world bounds — see player.js frameSubject(). `--no-auto-frame`
+// restores the pre-solver behaviour exactly (authored pose + `dolly` scalar),
+// which is how an already-approved older render is reproduced byte-for-byte.
+const autoFrame = tri('auto-frame', cfg.autoFrame, true);
+
+// Captions are resolved HERE, not down at the burn step, because the framing
+// bias below has to know whether a caption rail will be occupying the bottom
+// of the frame while the subject is being composed into it.
+const wantCaptions = tri('captions', fmtCfg(cfg.captions), false);
+// The title and end cards ride the SAME single libass pass as the captions
+// (each burn is a full re-encode, so they must not cost extra passes) — hence
+// no captions, no overlays at all. Resolved here rather than at the burn step
+// because the master cache below has to hand them to finish-video on a hit.
+const wantTitle = wantCaptions && tri('title', fmtCfg(cfg.titleCard), true);
+// The end card is separately OPT-IN: --endcard, `render.endCard` in the config,
+// or a per-explainer `endCard` string in video.js (itself an explicit ask). A
+// CTA is an outward-facing promise, never a side effect of wanting captions.
+// --no-endcard force-disables any of those.
+const wantEndCard =
+  wantCaptions &&
+  !flag('no-endcard') &&
+  (flag('endcard') || fmtCfg(cfg.endCard) === true || editorial?.endCard != null);
+
+const viewport =
+  format === 'short'
+    ? { width: 1080, height: 1920 }
+    : { width: 1920, height: 1080 };
+
+// Fraction of the frame the subject should occupy, and how far UP the frame to
+// push it so the burned caption rail does not sit across it. Portrait fills
+// tighter (there is no side panel to leave room for) and biases harder (the
+// short's rail sits at 15% of frame height with room for two lines above it).
+// A scalar means both axes; the config may also give { w, h } (see frameSubject),
+// so only a CLI --fill is coerced to a number.
+const baseFill = flag('fill') ? Number(opt('fill')) : (fmtCfg(cfg.fill) ?? (format === 'short' ? 0.88 : 0.78));
+const baseBias = fmtCfg(cfg.bias) ?? (wantCaptions ? (format === 'short' ? 0.1 : 0.04) : 0);
+
+// --- brand overlays -------------------------------------------------------
+// The title/end-card COPY and every caption decision live in finish-video.mjs
+// (the burn pass owns them). All this stage needs is the explainer's name, and
+// only so it can be handed across.
 let metaTitle = null;
 const metaPath = resolve(`src/explainers/${id}/meta.js`);
 if (existsSync(metaPath)) {
   metaTitle = (await import(pathToFileURL(metaPath))).default?.title ?? null;
 }
-const displayTitle =
-  editorial?.titleCard ?? (metaTitle ? compactTitle(metaTitle).toUpperCase() : null);
-// End card: the closing share/funnel beat. OPT-IN (2026-08-11, user request):
-// it burns only when explicitly asked for, via `--endcard` or an `endCard`
-// field in video.js. It used to ride `--captions` by default, which put a
-// "Full length version on YouTube" CTA on the end of shorts whose long-form
-// did not exist. A CTA is an outward-facing promise, so it is now the
-// caller's deliberate choice, never a side effect of wanting captions.
+
+
+// --- master cache ---------------------------------------------------------
+// The silent master is a pure function of the model, the step definitions, and
+// the shot list's framing/timing fields. It does NOT depend on narration
+// wording, caption text, caption styling or card copy — so a caption fix should
+// cost two fast re-encodes, not a full frame re-render (see
+// docs/video-pipeline-plan.md §5).
 //
-// The copy below is what `--endcard` burns when no per-explainer `endCard`
-// overrides it. Overridable per explainer; `\n`
-// splits lines IF you want more than one — but the EndCard style shares its
-// MarginV/Alignment with Cap (the rail captions) on purpose, so a 1-line
-// card lands at the EXACT same position captions have held all video. A
-// 2-line card anchored at that same point pushes its top line upward,
-// which reads as the captions randomly "jumping" position in the last few
-// seconds — confirmed 2026-07-28 by comparing rendered frames. Default is
-// single-line for this reason; only go multi-line with a deliberate reason.
-//
-// The default is FORMAT-AWARE (2026-08-05): a short's job is to feed the
-// long-form, so it points at YouTube, while the long-form IS the YouTube
-// video and keeps the share CTA (telling a YouTube viewer to watch it on
-// YouTube reads as a mistake).
-//
-// The short's card is two lines on purpose, and that is the "deliberate
-// reason" the caveat above asks for. Every single-line phrasing that
-// actually names YouTube overflows the 960px short-form budget at 84px
-// Arial Black — measured, not guessed: "Full video on YouTube" 1007px,
-// "Full version on YouTube" 1095px, "Full length on YouTube" 1049px. Split
-// across two lines, both fit with real margin (849px and 535px). The
-// sits-higher side effect is harmless here specifically: the end card is
-// scheduled AFTER the last spoken caption, so there is no rail caption on
-// screen for it to be mistaken for.
-const SHORT_END_CARD = ['Full length version', 'on YouTube'].join('\n');
-const endCardText = editorial?.endCard ?? (format === 'short' ? SHORT_END_CARD : 'Share it.');
+// The narration TIMINGS are an input even though the words are not: the audio
+// is the master clock, so a re-recorded take of a different length genuinely
+// changes what is on screen when. Hashing the timings file's bytes covers that
+// honestly — a re-worded line that happens to land at the identical duration is
+// rare enough not to chase.
+const SOLVER_VERSION = 1; // bump when frameSubject()'s output changes
+const masterPath = join(outRoot, `${format}-master.mp4`);
+const masterHashPath = join(outRoot, `${format}-master.hash`);
+const renderInfoPath = join(outRoot, `${format}-render.json`);
+const timelinePath = join(outRoot, `${format}-timeline.json`);
+const timingsFile = join(outRoot, 'audio', `${format}-timings.json`);
+
+const readIf = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '');
+
+function masterInputsHash() {
+  // No editorial means the shot list is derived from the live step count, which
+  // this stage cannot know without booting the page — so don't pretend to cache.
+  if (!editorial?.[format]?.shots) return null;
+  const framingFields = ['step', 'seconds', 'speed', 'dolly', 'camera', 'fill', 'bias', 'frame', 'labels'];
+  const shots = editorial[format].shots.map((s) =>
+    Object.fromEntries(framingFields.filter((k) => s[k] !== undefined).map((k) => [k, s[k]])),
+  );
+  const h = createHash('sha1');
+  h.update(
+    JSON.stringify({
+      v: SOLVER_VERSION,
+      format,
+      fps,
+      viewport,
+      autoFrame,
+      baseFill,
+      baseBias,
+      shots,
+      model: readIf(resolve(`src/explainers/${id}/model.js`)),
+      steps: readIf(resolve(`src/explainers/${id}/index.js`)),
+      timings: readIf(timingsFile),
+    }),
+  );
+  return h.digest('hex');
+}
+
+const inputsHash = masterInputsHash();
+
+function writeMasterHash() {
+  if (inputsHash) writeFileSync(masterHashPath, inputsHash);
+}
+
+function renderInfo() {
+  return {
+    viewport,
+    videoDuration: Number(clock.toFixed(3)),
+    audioDelay,
+    continuous,
+    fps,
+    autoFrame,
+    shots: shots.length,
+  };
+}
+
+// A cache hit skips frame capture entirely and goes straight to the burn + mix.
+if (
+  !flag('force-frames') &&
+  inputsHash &&
+  existsSync(masterPath) &&
+  existsSync(renderInfoPath) &&
+  existsSync(timelinePath) &&
+  readIf(masterHashPath).trim() === inputsHash
+) {
+  const info = JSON.parse(readFileSync(renderInfoPath, 'utf8'));
+  console.log(
+    `master: CACHED (${format}-master.mp4, ${info.videoDuration}s) — inputs unchanged, skipping ${info.shots} shots. --force-frames to re-render.`,
+  );
+  finishVideo({
+    id,
+    format,
+    outRoot,
+    viewport: info.viewport,
+    videoDuration: info.videoDuration,
+    audioDelay: info.audioDelay,
+    continuous: info.continuous,
+    timeline: JSON.parse(readFileSync(timelinePath, 'utf8')),
+    editorial,
+    metaTitle,
+    wantCaptions,
+    wantTitle,
+    wantEndCard,
+    captionStyle: fmtCfg(cfg.captionStyle) ?? DEFAULT_PRESET,
+  });
+  console.log('done');
+  process.exit(0);
+}
 
 // --- launch page with virtual clock --------------------------------------
 const framesDir = join(outRoot, `${format}-frames`);
@@ -168,8 +293,15 @@ await page.addInitScript(() => {
 
 // The first shot's dolly must exist BEFORE the player boots: boot flies to
 // the first step immediately, and re-activating the same step is a no-op.
-const baseDolly = format === 'short' ? Number(editorial?.short?.dolly ?? 1.35) : 1;
-const firstDolly = editorial?.[format]?.shots?.[0]?.dolly ?? baseDolly;
+// Under auto-framing the solver owns distance outright, so the legacy scalar
+// is pinned at 1 and every `dolly` in an old video.js is ignored (the shot's
+// `fill` is the knob now) — mixing the two would double-correct.
+const baseDolly = autoFrame
+  ? 1
+  : format === 'short'
+    ? Number(editorial?.short?.dolly ?? 1.35)
+    : 1;
+const firstDolly = autoFrame ? 1 : (editorial?.[format]?.shots?.[0]?.dolly ?? baseDolly);
 await page.addInitScript((v) => { window.__hiwCameraScale = v; }, firstDolly);
 
 await page.goto(`http://localhost:${port}/#/${id}`);
@@ -292,11 +424,15 @@ console.log(`${id} [${format}] ${viewport.width}x${viewport.height}@${fps} — $
 let frame = 0;
 let clock = 0; // seconds on the output timeline
 const timeline = [];
+const framing = {}; // shot index -> the pose auto-framing solved, for the gate + storyboard
 const t0 = Date.now();
 
 for (const [si, shot] of shots.entries()) {
   const isFirst = si === 0;
-  await setDolly(shot.dolly ?? baseDolly);
+  // A shot with an explicit `camera` keeps its authored `dolly`; an auto-framed
+  // one is pinned at 1 because the solver already put the distance where it
+  // wants it (see baseDolly above).
+  await setDolly(autoFrame && !shot.camera ? 1 : (shot.dolly ?? baseDolly));
   await page.evaluate((n) => window.__hiw.activate(n), shot.step);
 
   // Per-shot camera override (OPT-IN via `camera: {position, target}` in
@@ -349,6 +485,27 @@ for (const [si, shot] of shots.entries()) {
     }, shot.labels);
   }
 
+  // --- auto-framing --------------------------------------------------------
+  // Solve this shot's camera from the subject's real world bounds instead of a
+  // hand-guessed `dolly`, then fly to the solved pose. Runs AFTER the label
+  // override above on purpose: narrowing the visible callouts shrinks the box
+  // the solver has to fit, so a shot that talks about one part frames that part
+  // rather than every anchor the step happens to own.
+  //
+  // Skipped when the shot pins an explicit `camera` — that is deliberate art
+  // direction and must win — and when --no-auto-frame reproduces a legacy render.
+  //
+  // The subject defaults to the step's own `focus` list (already authored on
+  // most steps, and already means "what this step is about"); `frame: [...]`
+  // overrides it per shot, and `frame: null` means the whole model.
+  if (autoFrame && !shot.camera) {
+    const solved = await page.evaluate(
+      (o) => window.__hiw.frameTo(o),
+      { keys: shot.frame, fill: shot.fill ?? baseFill, bias: shot.bias ?? baseBias },
+    );
+    framing[si] = solved;
+  }
+
   // One continuous span per shot. The fly-to (triggered by activate above)
   // plays during the FIRST ~FLY_SECONDS of it — captured as part of the shot,
   // never added on top — so lines butt up against each other with no silent
@@ -391,6 +548,7 @@ for (const [si, shot] of shots.entries()) {
     contentStart: Number(contentStart.toFixed(3)),
     end: Number(clock.toFixed(3)),
     caption: shot.caption ?? null,
+    framed: framing[si] ?? null,
     narration: shot.narration ?? null,
     sfx: shot.sfx ?? null,
   });
@@ -425,291 +583,30 @@ run(
 );
 console.log(`master: ${master} (${(frame / fps).toFixed(1)}s)`);
 
-// --- captions --------------------------------------------------------------
-// ASS burned via libass: auto-wraps, real outline, positioned per format.
-// OPT-IN (--captions). Two sources, in priority order:
-//   VERBATIM RAIL (preferred) — make-narration wrote <format>-words.json, the
-//     ElevenLabs word-level alignment for the single take. We group the spoken
-//     words into short lower-third cues timed to WHEN THEY'RE ACTUALLY SAID, so
-//     the on-screen text matches the narrator's voice (the captions-overlay
-//     "rail" model). No summary text, no title card — the spoken words carry it.
-//   LEGACY SUMMARY (fallback, no words.json — e.g. Edge TTS with no alignment) —
-//     the per-shot `caption` one-liners plus the hook overlay, kept for
-//     back-compat. (Silent -captioned.mp4 for trending-audio posting is still
-//     produced whenever --captions is passed.)
-const wantCaptions = args.includes('--captions');
-// title + end card ride the same single burn pass as captions (each burn is a
-// full re-encode, so they must not cost extra passes). Opt out individually.
-const wantTitle = wantCaptions && !args.includes('--no-title');
-// opt-in: --endcard, or a per-explainer `endCard` in video.js (itself an
-// explicit ask). --no-endcard still force-disables either of those.
-const wantEndCard =
-  wantCaptions &&
-  !args.includes('--no-endcard') &&
-  (args.includes('--endcard') || editorial?.endCard != null);
-const TITLE_SECONDS = 5;
-const ENDCARD_SECONDS = 3.5;
-const short = format === 'short';
-const ts = (s) => {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = (s % 60).toFixed(2).padStart(5, '0');
-  return `${h}:${String(m).padStart(2, '0')}:${sec}`;
-};
-const esc = (t) => String(t).replace(/\n/g, '\\N');
-
-// Build the cue list on the VIDEO timeline: { start, end, text }.
-const wordsPath = join(audioDir, `${format}-words.json`);
-let cues = [];
-let hookLine = null; // top title card — legacy path only (non-verbatim)
-const HILITE = '&H00FFFF&'; // ASS BGR — bright yellow pop on the active word
-if (wantCaptions && existsSync(wordsPath)) {
-  const words = JSON.parse(readFileSync(wordsPath, 'utf8'));
-  // group verbatim words into readable, voice-synced phrase groups (1-4 words
-  // visible at once for shorts — the trending word-by-word rail shape)
-  const maxWords = short ? 4 : 7;
-  // 26 was a guess and never actually fit: measured via headless Chromium
-  // canvas.measureText at the real render font (84px Arial Black, 960px
-  // available width after margins), a 26-char short-form group averages
-  // ~1150-1250px wide — 30% wider than the frame allows. That overflow (not
-  // wrapping) is what caused captions to run edge-to-edge / look
-  // inconsistently positioned. 18 was verified empirically (see
-  // scripts/find-safe-caption-cap.tmp.mjs) to keep every group under 900px,
-  // a real safety margin below the 960px budget. Long-form's 44 at 58px
-  // measured fine (max ~1406px vs 1800px available) — left unchanged.
-  const maxChars = short ? 18 : 44;
-  const groups = [];
-  let grp = [];
-  const flush = () => {
-    if (!grp.length) return;
-    groups.push(grp);
-    grp = [];
-  };
-  for (const w of words) {
-    // Check BEFORE adding: the old check ran after pushing, so a group could
-    // overshoot maxChars by up to one whole word — long enough at 84px Arial
-    // Black to exceed the frame width and trigger libass's WrapStyle auto-wrap,
-    // which silently turns one "line" into two and, since captions are
-    // bottom-anchored, shoves the whole block upward. Breaking BEFORE the
-    // word that would cross the cap guarantees every group actually fits.
-    const prospectiveLen = grp.reduce((n, x) => n + x.t.length + 1, -1) + w.t.length + 1;
-    if (grp.length && (grp.length >= maxWords || prospectiveLen > maxChars)) flush();
-    grp.push(w);
-    const hard = /[.?!]["')\]]?$/.test(w.t); // sentence end -> always break
-    const soft = /[,;:—]$/.test(w.t) && grp.length >= 2; // clause end
-    if (hard || soft) flush();
-  }
-  flush();
-  // audio starts at audioDelay. Each word in a group gets its own cue so the
-  // word being spoken pops in a highlight colour (karaoke-style), held until
-  // the next word begins; the group as a whole holds ~1s into a trailing pause.
-  const videoEnd = clock;
-  groups.forEach((g, gi) => {
-    const nextGroupStart = gi + 1 < groups.length ? groups[gi + 1][0].s + audioDelay : Infinity;
-    const groupEnd = Math.min(nextGroupStart, g[g.length - 1].e + audioDelay + 1.0, videoEnd);
-    g.forEach((w, i) => {
-      const start = w.s + audioDelay;
-      const nextWordStart = i + 1 < g.length ? g[i + 1].s + audioDelay : groupEnd;
-      // NEVER let end exceed the next cue's start: a `start + 0.15` minimum-
-      // duration floor here can push end past nextWordStart/groupEnd when
-      // words are spoken faster than 150ms apart, creating a genuine time
-      // overlap between two consecutive same-style Dialogue lines. libass
-      // then applies its collision-avoidance stacking (for lines it thinks
-      // are simultaneously visible) and shoves one upward by roughly a line
-      // height — this is the actual cause of captions appearing to jump
-      // position throughout the video (confirmed 2026-07-28 by finding 22
-      // genuine start/end overlaps in the generated .ass and reproducing the
-      // exact ~100px shift). A very fast word's highlight flashing under
-      // 150ms is a far smaller cost than that.
-      const end = Math.min(nextWordStart, groupEnd);
-      const text = g
-        .map((x, j) => (j === i ? `{\\c${HILITE}}${esc(x.t)}{\\r}` : esc(x.t)))
-        .join(' ');
-      cues.push({ start, end, text });
-    });
-  });
-  console.log(`captions: verbatim rail — ${cues.length} word-synced cues from ${words.length} words (active-word highlight)`);
-} else if (wantCaptions) {
-  for (const t of timeline) if (t.caption) cues.push({ start: t.contentStart, end: t.end, text: esc(t.caption) });
-  if (short && editorial?.hook) hookLine = editorial.hook;
-  console.log(`captions: legacy summary — ${cues.length} cues${hookLine ? ' + hook' : ''} (no words.json)`);
-}
-
-// NON-OVERLAPPING CUES — the caption-bounce fix.
-// libass renders every event that is live at an instant, STACKING simultaneous
-// ones vertically. So two cues whose time ranges overlap by even a few frames
-// push the caption a full line across the frame and back, which reads as the
-// subtitles jumping up and down for the whole video.
-// The word rail overlaps constantly: its minimum-duration floor (start + 0.15s)
-// overruns the next word's start whenever a word is spoken faster than 150ms.
-// Clamping each cue to end exactly where the next begins removes the stacking
-// without opening gaps — the rail stays continuous, one cue at a time.
-cues.sort((a, b) => a.start - b.start || a.end - b.end);
-for (let i = 0; i < cues.length - 1; i++) {
-  if (cues[i].end > cues[i + 1].start) cues[i].end = cues[i + 1].start;
-}
-cues = cues.filter((c) => c.end > c.start);
-
-// Title holds for the first TITLE_SECONDS then clears, so nothing competes with
-// the mechanism and it can never collide with the CSS2D callouts that float
-// around the model mid-video.
-const videoDuration = clock;
-const titleText = wantTitle && displayTitle ? displayTitle : null;
-// The end card sits in the SAME bottom slot as the captions, so starting it
-// before the last cue clears is a hard collision (two dialogues stacking on one
-// anchor), not just visual competition. It must begin after lastCueEnd — which
-// is why TAIL_PAD has to be generous enough to leave the card a readable window
-// once the final caption's trailing hold has expired.
-let endCardStart = null;
-if (wantEndCard && endCardText) {
-  const lastCueEnd = cues.length ? Math.max(...cues.map((c) => c.end)) : 0;
-  endCardStart = Math.max(
-    videoDuration - ENDCARD_SECONDS,
-    Math.min(lastCueEnd + 0.15, videoDuration - 1.5),
-  );
-  if (endCardStart >= videoDuration - 0.4) endCardStart = null; // no room
-}
-
-let captioned = master;
-if (wantCaptions && (cues.length || hookLine || titleText || endCardStart != null)) {
-  // trending shorts/reels look: heavy black-weight font, bigger, active-word
-  // highlight pop, positioned center-ish (clear of the bottom platform-UI zone)
-  const fontName = 'Arial Black';
-  const fontSize = short ? 84 : 58;
-  // NOTE: true center (the usual shorts/reels convention) collides with this
-  // app's own callout labels, which float around the 3D model mid-frame —
-  // so both formats stay bottom-anchored, clear of them.
-  const alignment = 2;
-  const marginV = short ? Math.round(viewport.height * 0.15) : 60;
-  // CAPTION BASELINE STABILITY. Bottom-anchored text (alignment 2) grows
-  // UPWARD: a one-line cue sits on the margin, a two-line cue starts a line
-  // higher. Across a word-synced rail the wrap count flips constantly, so the
-  // captions visibly bounce up and down for the whole video.
-  // Fix: top-anchor the caption block (alignment 8) so the FIRST line is
-  // pinned and extra lines extend downward instead. The reserve below keeps a
-  // two-line cue's last line on the old bottom margin, so the block occupies
-  // the same zone as before — it just no longer moves.
-  const capLineHeight = Math.round(fontSize * 1.2);
-  const capAlignment = 8;
-  const capMarginV = Math.max(0, viewport.height - marginV - capLineHeight * 2);
-  const titleMarginV = short ? Math.round(viewport.height * 0.09) : 54;
-  // when a title card is present the legacy hook drops below it instead of
-  // stacking on the same top-center anchor
-  const hookMarginV = titleText
-    ? titleMarginV + Math.round(fontSize * 2.2)
-    : Math.round(viewport.height * 0.14);
-  const lines = [];
-  if (titleText) lines.push(`Dialogue: 2,${ts(0)},${ts(TITLE_SECONDS)},Title,,0,0,0,,${esc(titleText)}`);
-  if (endCardStart != null) {
-    lines.push(`Dialogue: 2,${ts(endCardStart)},${ts(videoDuration)},EndCard,,0,0,0,,${esc(endCardText)}`);
-  }
-  // shorts (legacy only): hook on top-third for the first 3 seconds
-  if (hookLine) lines.push(`Dialogue: 1,${ts(0)},${ts(3)},Hook,,0,0,0,,${esc(hookLine)}`);
-  for (const c of cues) {
-    lines.push(`Dialogue: 0,${ts(c.start)},${ts(c.end)},Cap,,0,0,0,,${c.text}`);
-  }
-  const ass = `[Script Info]
-ScriptType: v4.00+
-PlayResX: ${viewport.width}
-PlayResY: ${viewport.height}
-WrapStyle: 2
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,0,0,1,5,1,${capAlignment},60,60,${capMarginV},1
-Style: Hook,${fontName},${Math.round(fontSize * 1.15)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,0,0,1,5,1,8,60,60,${hookMarginV},1
-Style: Title,${fontName},${Math.round(fontSize * 0.92)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,4,0,1,5,1,8,60,60,${titleMarginV},1
-Style: EndCard,${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H7F000000,-1,0,0,0,100,100,0,0,1,5,1,${alignment},60,60,${marginV},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-${lines.join('\n')}
-`;
-  const assName = `${format}-captions.ass`;
-  writeFileSync(join(outRoot, assName), ass);
-  captioned = join(outRoot, `${format}-captioned.mp4`);
-  // run with cwd = outRoot so the subtitles filter gets a plain relative
-  // filename (Windows drive-letter paths break libass filter escaping)
-  const r = spawnSync(
-    ffmpeg,
-    [
-      '-y', '-i', `${format}-master.mp4`,
-      '-vf', `subtitles=${assName}:fontsdir='C\\:/Windows/Fonts'`,
-      '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
-      '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
-      `${format}-captioned.mp4`,
-    ],
-    { cwd: outRoot, stdio: ['ignore', 'ignore', 'pipe'] },
-  );
-  if (r.status !== 0) {
-    console.error(`caption burn failed (master still usable):\n${r.stderr.toString().slice(-2000)}`);
-    captioned = master;
-  } else {
-    console.log(`captioned: ${captioned}`);
-  }
-}
-
-// --- audio mix --------------------------------------------------------------
-// audio-master mode: one continuous take (<format>-full.mp3) dropped once at
-// LEAD_IN — the whole voiceover is a single input, so it plays exactly as it
-// was performed. legacy mode: per-shot files (<format>-shot-NN.mp3) delayed to
-// each shot's contentStart. sfx cues (assets/sfx/<name>.mp3) layer on either.
-// Everything optional — missing files skipped, silent video still ships.
-const inputs = [];
-const delays = [];
-if (continuous) {
-  inputs.push(fullAudioPath);
-  delays.push(Math.round(audioDelay * 1000));
-}
-for (const [si, t] of timeline.entries()) {
-  if (!continuous) {
-    const seg = join(audioDir, `${format}-shot-${String(si).padStart(2, '0')}.mp3`);
-    if (existsSync(seg)) {
-      inputs.push(seg);
-      delays.push(Math.round(t.contentStart * 1000));
-    }
-  }
-  for (const cue of t.sfx ?? []) {
-    const f = resolve('assets/sfx', `${cue.file}.mp3`);
-    if (existsSync(f)) {
-      inputs.push(f);
-      delays.push(Math.round((t.contentStart + (cue.at ?? 0)) * 1000));
-    }
-  }
-}
-if (inputs.length) {
-  const final = join(outRoot, `${format}-final.mp4`);
-  const fin = ['-i', captioned];
-  for (const f of inputs) fin.push('-i', f);
-  const chains = inputs.map(
-    (_, i) => `[${i + 1}:a]adelay=${delays[i]}|${delays[i]}[a${i}]`,
-  );
-  // amix preserves the authored per-input balance (normalize=0), then loudnorm
-  // brings the FINISHED mix to the streaming target. Without this the export
-  // lands well under platform loudness and sounds thin next to the normalized
-  // feed around it — which reads as amateur before a word is understood.
-  const mix =
-    `${chains.join(';')};${inputs.map((_, i) => `[a${i}]`).join('')}` +
-    `amix=inputs=${inputs.length}:normalize=0[mixed];` +
-    `[mixed]loudnorm=I=-14:TP=-1.5:LRA=11[out]`;
-  run(
-    [
-      ...fin,
-      '-filter_complex', mix,
-      '-map', '0:v', '-map', '[out]',
-      // NOT -shortest: the narration ends before the video does (that tail is
-      // deliberate — it is the end card's window), and -shortest would cut the
-      // video back to the audio and clip the CTA down to a flash. Bound the
-      // output by the rendered video length instead.
-      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-t', videoDuration.toFixed(3),
-      final,
-    ],
-    'audio mix',
-  );
-  console.log(`final (with audio): ${final}`);
-} else {
-  console.log('audio: no narration/sfx files found — skipped (run make-narration.mjs first for voiced output)');
-}
+writeMasterHash();
+writeFileSync(join(outRoot, `${format}-render.json`), JSON.stringify(renderInfo(), null, 2));
 
 if (!keepFrames) rmSync(framesDir, { recursive: true, force: true });
+
+// --- finish (captions + audio) --------------------------------------------
+// Imported rather than shelled out to, so a normal export is still one process
+// and one command. The same function is what `node scripts/finish-video.mjs`
+// runs standalone against a cached master.
+finishVideo({
+  id,
+  format,
+  outRoot,
+  viewport,
+  videoDuration: clock,
+  audioDelay,
+  continuous,
+  timeline,
+  editorial,
+  metaTitle,
+  wantCaptions,
+  wantTitle,
+  wantEndCard,
+  captionStyle: fmtCfg(cfg.captionStyle) ?? DEFAULT_PRESET,
+});
+
 console.log('done');

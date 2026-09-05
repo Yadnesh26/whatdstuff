@@ -39,6 +39,12 @@ const OUT = 'public/plates';
 // later step frames better WITHOUT changing the in-app camera, pin it here —
 // otherwise a plain `make-plates.mjs` run silently reverts the fix.
 const OVERRIDES = {
+  // step 1 is framed for the app: pushed hard right AND dropped down the frame
+  // so the hero title clears it, which on a panel-less card leaves the whole
+  // upper-left empty. Step 6 is the same complete system from a wider, flatter
+  // camera with no drop — Sun, all eight orbits, Saturn's rings legible at card
+  // size.
+  'solar-system': { step: 6 },
   // step 1 sits the whole machine in the right-hand third - correct in the app,
   // where the text panel owns the left, but it leaves the card half empty.
   // Step 8 is the same sealed, running machine framed wider: aluminium snail,
@@ -60,6 +66,11 @@ const OVERRIDES = {
   // drops the door and rolls the racks out — plates, glasses and the dispenser,
   // instantly legible as a dishwasher at thumbnail size.
   dishwasher: { step: 2 },
+  // step 1 is a painted white cylinder, and at card size that is a boiler, an
+  // air receiver or a water softener - nothing says heater. Step 2 opens the
+  // wedge on the whole unit: foam sandwich, glass-lined tank, and the red-over-
+  // blue water column that IS the story, legible at thumbnail size.
+  'electric-water-heater': { step: 2 },
   // step 1 sits the engine high-left with the plume running off-frame; the
   // sealed-and-running finale is the same editorial beat, framed tighter.
   'rocket-engine': { step: 9 },

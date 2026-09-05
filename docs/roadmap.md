@@ -33,6 +33,11 @@ ideas, roughly ordered by educational return per effort.
 
 ## Production
 
+- **Video export pipeline rebuild** — auto subject framing, deterministic loop
+  phase + turntable control (no unwanted rotation), a declarative `render`
+  block per explainer, a cached master so caption/wording fixes skip the frame
+  render, themeable caption presets, and framing/caption/script gates.
+  Plan: [video-pipeline-plan.md](video-pipeline-plan.md).
 - **Sound design** — subtle mechanism-synced audio (hum, clicks, flow) for
   exported videos first (FFmpeg mix), interactive later.
 - **One module → many assets** — thumbnail, blog post, social images generated
