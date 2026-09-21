@@ -1,6 +1,6 @@
 // Generate sound effects with the ElevenLabs sound-generation API.
 //
-//   node scripts/make-sfx.mjs <film-id>            generate the film's missing cues
+//   node scripts/make-sfx.mjs <film-id|explainer-id>   generate its missing cues
 //   node scripts/make-sfx.mjs --name relay-clunk --prompt "a heavy electrical relay closing, close mic, dry"
 //   node scripts/make-sfx.mjs <film-id> --force    regenerate everything
 //   node scripts/make-sfx.mjs <film-id> --list     show what would be generated
@@ -48,28 +48,40 @@ if (oneOffName) {
   }
   cues = [{ name: oneOffName, prompt, seconds: Number(opt('seconds', '3')), influence: Number(opt('influence', '0.4')) }];
 } else if (filmId) {
+  // One id, two possible homes: a film manifest or an explainer's video.js.
+  // Both declare the SAME `sfxLibrary` shape and both are consumed from the
+  // same assets/sfx folder, so there is no reason for an explainer to have
+  // needed a different command — it just never had one, which is why 0 of 68
+  // shipped shorts carry a single sound.
   const filmPath = resolve(`films/${filmId}/film.js`);
-  if (!existsSync(filmPath)) {
-    console.error(`${filmPath} not found`);
+  const videoPath = resolve(`src/explainers/${filmId}/video.js`);
+  const isFilm = existsSync(filmPath);
+  const srcPath = isFilm ? filmPath : videoPath;
+  if (!existsSync(srcPath)) {
+    console.error(`no films/${filmId}/film.js and no src/explainers/${filmId}/video.js`);
     process.exit(1);
   }
-  const film = (await import(pathToFileURL(filmPath))).default;
-  const lib = film.sfxLibrary ?? {};
+  const mod = (await import(pathToFileURL(srcPath))).default;
+  const lib = mod.sfxLibrary ?? {};
   cues = Object.entries(lib).map(([name, v]) =>
     typeof v === 'string'
       ? { name, prompt: v, seconds: 3, influence: 0.4 }
       : { name, prompt: v.prompt, seconds: v.seconds ?? 3, influence: v.influence ?? 0.4 },
   );
+  console.log(`${isFilm ? 'film' : 'explainer'}: ${srcPath}`);
   // Warn about cues shots reference but the library never declares — that
   // mismatch otherwise surfaces as a silent gap in the finished mix.
   const declared = new Set(cues.map((c) => c.name));
   const used = new Set();
-  for (const act of film.acts ?? []) {
-    for (const shot of act.shots ?? []) for (const s of shot.sfx ?? []) used.add(s.file);
-  }
+  const eat = (shots) => {
+    for (const shot of shots ?? []) for (const s of shot.sfx ?? []) used.add(s.file);
+  };
+  if (isFilm) for (const act of mod.acts ?? []) eat(act.shots);
+  else for (const f of ['short', 'long']) eat(mod[f]?.shots);
   for (const u of used) if (!declared.has(u)) console.warn(`  shots reference "${u}" but sfxLibrary does not declare it`);
+  for (const c of cues) if (!used.has(c.name)) console.warn(`  sfxLibrary declares "${c.name}" but no shot uses it`);
 } else {
-  console.error('usage: node scripts/make-sfx.mjs <film-id> | --name <n> --prompt "<desc>"');
+  console.error('usage: node scripts/make-sfx.mjs <film-id|explainer-id> | --name <n> --prompt "<desc>"');
   process.exit(1);
 }
 

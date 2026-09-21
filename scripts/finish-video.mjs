@@ -198,10 +198,12 @@ export function finishVideo({
   // contentStart. sfx cues (assets/sfx/<name>.mp3) layer on either.
   const inputs = [];
   const delays = [];
+  const gains = []; // per-input linear gain; null = untouched
   const fullAudioPath = join(audioDir, `${format}-full.mp3`);
   if (continuous && existsSync(fullAudioPath)) {
     inputs.push(fullAudioPath);
     delays.push(Math.round(audioDelay * 1000));
+    gains.push(null); // the voice is the reference level, never attenuated
   }
   for (const [si, t] of timeline.entries()) {
     if (!continuous) {
@@ -209,6 +211,7 @@ export function finishVideo({
       if (existsSync(seg)) {
         inputs.push(seg);
         delays.push(Math.round(t.contentStart * 1000));
+        gains.push(null);
       }
     }
     for (const cue of t.sfx ?? []) {
@@ -216,6 +219,8 @@ export function finishVideo({
       if (existsSync(f)) {
         inputs.push(f);
         delays.push(Math.round((t.contentStart + (cue.at ?? 0)) * 1000));
+        // `gain` is linear: 0.5 is about 6 dB down, i.e. half as loud.
+        gains.push(typeof cue.gain === 'number' ? cue.gain : null);
       }
     }
   }
@@ -225,7 +230,11 @@ export function finishVideo({
     final = join(outRoot, `${format}-final.mp4`);
     const fin = ['-i', captioned];
     for (const f of inputs) fin.push('-i', f);
-    const chains = inputs.map((_, i) => `[${i + 1}:a]adelay=${delays[i]}|${delays[i]}[a${i}]`);
+    const chains = inputs.map((_, i) => {
+      const g = gains[i];
+      const vol = g != null && g !== 1 ? `,volume=${g}` : '';
+      return `[${i + 1}:a]adelay=${delays[i]}|${delays[i]}${vol}[a${i}]`;
+    });
     // amix preserves the authored per-input balance (normalize=0), then loudnorm
     // brings the FINISHED mix to the streaming target. Without this the export
     // lands well under platform loudness and sounds thin next to the normalized

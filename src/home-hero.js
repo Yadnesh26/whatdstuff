@@ -9,9 +9,14 @@
 // It also performs the page's headline: the train assembles itself out of an
 // exploded view on load, and comes apart again as you scroll off the hero.
 //
-// Home-page only, by design (CLAUDE.md rule 4): the framework stays shared, so
-// nothing here touches stage.js. three.js is already in the entry bundle for
-// the explainer stage, so this module adds only its own geometry code.
+// studioEnv() and heatBlueTexture() are exported for about-hero.js, which
+// runs a different object with a different story behind the about page's
+// copy — same lighting/material toolkit, deliberately not the same scene.
+//
+// Chrome-layer code, not the explainer framework (CLAUDE.md rule 4 is about
+// framework/stage.js): nothing here touches stage.js. three.js is already in
+// the entry bundle for the explainer stage, so this module adds only its own
+// geometry code.
 import * as THREE from 'three';
 import { materials } from './framework/parts.js';
 
@@ -119,7 +124,11 @@ function addSweepUV1(geo, radius, angle, lo = 0, hi = 1) {
 // Metalness 1 means the environment IS the lighting — a dark room gives dark
 // metal. So: bright ceiling, a broad softbox across the horizon (what the flat
 // gear faces reflect back at the camera), dark floor.
-function studioEnv(dark) {
+// Exported so about-hero.js's different hero object can light itself with
+// the same validated studio rig (a pure-metal scene has no diffuse response,
+// so the "ring that never goes to zero" fix below is load-bearing, not
+// decorative — worth reusing exactly, not re-deriving).
+export function studioEnv(dark) {
   const c = document.createElement('canvas');
   c.width = 512;
   c.height = 256;
@@ -192,7 +201,7 @@ function studioEnv(dark) {
 // Heat-blued steel, the same ramp as textures.js heatBlueMap(): straw-gold
 // through violet to cold steel. It is the accent of the whole page, so exactly
 // one gear in the train carries it.
-function heatBlueTexture() {
+export function heatBlueTexture() {
   const c = document.createElement('canvas');
   c.width = 512;
   c.height = 8;

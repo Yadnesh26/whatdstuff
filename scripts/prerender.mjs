@@ -271,6 +271,10 @@ metas.sort((a, b) => a.title.localeCompare(b.title));
 
 const { categories, itemsIn } = await import(pathToFileURL(resolve('src/categories.js')).href);
 
+// about-copy.js is the About page's words, in a pure data module for exactly
+// this reason: the static shell below and src/about.js render the same copy.
+const { about, withCount } = await import(pathToFileURL(resolve('src/about-copy.js')).href);
+
 // --- page shell -------------------------------------------------------------
 function page({ title, description, canonical, ogType = 'article', image, body }) {
   const imageTags = image
@@ -371,6 +375,43 @@ function categoryBody(catId) {
     </article>`;
 }
 
+function aboutBody() {
+  const section = (heading, inner) => `
+      <section>
+        <h2>${esc(heading)}</h2>
+        ${inner}
+      </section>`;
+  const statsList = `<ul>${about.stats
+    .map((s) => `<li>${esc(withCount(s.value, metas.length))} ${esc(s.label)} — ${esc(s.note)}</li>`)
+    .join('')}</ul>`;
+  return `
+    <article>
+      <nav aria-label="Breadcrumb"><a href="/">whatDstuff</a> › <span>About</span></nav>
+      <header>
+        <h1>${about.heroLines.map((l) => esc(l)).join(' ')}</h1>
+        <p>${esc(about.deck)}</p>
+      </header>
+      ${about.intro.map((p) => `<p>${esc(p)}</p>`).join('')}
+      ${statsList}
+      ${section(
+        about.processHeading,
+        `<ol>${about.process
+          .map((x) => `<li><strong>${esc(x.name)}</strong> — ${esc(x.body)}</li>`)
+          .join('')}</ol>`,
+      )}
+      ${section(
+        about.principlesHeading,
+        `<ul>${about.principles
+          .map((x) => `<li><strong>${esc(x.title)}</strong> — ${esc(x.body)}</li>`)
+          .join('')}</ul>`,
+      )}
+      ${section(
+        about.ctaHeading,
+        `<p>${esc(withCount(about.ctaBody, metas.length))}</p><p><a href="/">${esc(about.ctaLabel)}</a></p>`,
+      )}
+    </article>`;
+}
+
 // --- write explainer pages --------------------------------------------------
 mkdirSync(DIST, { recursive: true });
 const sitemapUrls = [];
@@ -426,6 +467,20 @@ for (const [catId, cat] of Object.entries(categories)) {
   catPages += 1;
 }
 
+// --- write the about page ---------------------------------------------------
+mkdirSync(join(DIST, 'about'), { recursive: true });
+writeFileSync(
+  join(DIST, 'about', 'index.html'),
+  page({
+    title: 'About — whatDstuff',
+    description: about.deck,
+    canonical: `${SITE}/about`,
+    ogType: 'website',
+    body: aboutBody(),
+  }),
+);
+sitemapUrls.push({ loc: `${SITE}/about`, lastmod: lastmod('src/about-copy.js'), image: null });
+
 // home page's own lastmod, from the source shell rather than the built one
 sitemapUrls.unshift({ loc: `${SITE}/`, lastmod: lastmod('index.html'), image: null });
 
@@ -447,5 +502,5 @@ ${sitemapUrls
 `;
 writeFileSync(join(DIST, 'sitemap.xml'), sitemapXml);
 
-console.log(`prerendered ${metas.length} explainer pages + ${catPages} category pages`);
+console.log(`prerendered ${metas.length} explainer pages + ${catPages} category pages + about`);
 console.log(`wrote dist/sitemap.xml (${sitemapUrls.length} urls)`);

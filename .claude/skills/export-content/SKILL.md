@@ -109,11 +109,16 @@ isolated stat → real-world connection → callback button.
 - **hook**: beat 1, under 12 words. This is the spoken opening line, NOT the
   branded title card (that comes from `meta.js`). Keep it in sync with shot 1's
   opening sentence — the lint checks.
-- **short.shots**: ~70s. First shot shows the ENTIRE model.
+- **short.shots**: ~70s. First shot shows the ENTIRE model. Aim for **20-30
+  shots**, not one per spoken line — most are silent cuts (see "Cutting").
 - **long.shots**: ~2min, usually every step. Spoken prose, ~2.3 words/sec.
   Never paste step body copy; it's written for reading, not listening.
 - Optional per shot: `frame`, `fill`, `bias` (framing — below), `labels`,
-  `speed`, `sfx: [{ file, at }]`, `camera` (escape hatch — below).
+  `speed`, `sfx: [{ file, at }]`, `camera` (escape hatch — below), plus the
+  cutting vocabulary: `push` / `orbit` / `rise` (camera moves), `move`
+  ('cut' | 'fly'), and `seconds` on a silent shot — see "Cutting" below.
+- **Omit `narration` to make a silent cut inside the previous line.** That is
+  how a script gets from ~8 shots to ~25 without adding a word.
 - Consecutive shots may reuse the same `step`; the camera holds while the
   voiceover develops.
 - Do NOT add per-shot `caption` fields. They are the legacy fallback for when
@@ -147,6 +152,86 @@ is why hand-authored per-shot `camera` poses used to be necessary.
 `dolly` in a shot that is NOT art-directed is now IGNORED (the solver owns
 distance). Old `video.js` files keep working; their `dolly` values are simply
 no longer consulted.
+
+## Cutting — beats, silent shots, and camera moves
+
+A shot is a CAMERA SETUP, not a chapter. It used to be neither: shots were 1:1
+with spoken lines, so the picture had to hold for a whole sentence. Measured
+across 55 shipped shorts that produced a median of **8.8 seconds per shot**,
+where the format wants 2-3. Every shot was also frozen — the camera landed and
+then sat there.
+
+Both are fixed. The vocabulary:
+
+**A BEAT is one spoken line.** It is the shot carrying `narration` plus every
+SILENT shot after it (no `narration` field at all). The beat's audio span is
+divided among its shots, so a single sentence can carry three or four cuts:
+
+```js
+{ step: 2, narration: 'But they don’t fly straight — two magnets bend them into loops.' },
+{ step: 2, frame: ['Ring magnets'], seconds: 1.2 },   // silent cut, same line
+{ step: 2, frame: ['Anode cavities (12)'], push: 0.9 } // silent cut, pushing in
+```
+
+- Shot 0 MUST carry narration (it opens the take). Silent shots follow a spoken one.
+- `seconds` on a silent shot is a **request, honoured in proportion** — the beat's
+  total belongs to the narration, never to the author. The split always fills the
+  beat exactly, because the take is one continuous mp3 and any slack desyncs
+  every shot after it.
+- Minimum cut is 0.6s; below that a cut reads as a glitch. Too many shots on one
+  line prints a warning.
+- Adding or removing silent shots does **NOT** re-synthesize narration. Timings
+  are matched positionally (the Nth spoken shot to the Nth timing entry), so
+  re-cutting the picture is free and keeps the take you already approved. Only
+  changing the WORDS costs an API call.
+
+**Silent shots CUT; narrated shots FLY.** A hard cut snaps the camera; a fly is
+the player's 1.3s eased move. Spending 1.3s gliding into a 2s cutaway is drift,
+not an edit. Override per shot with `move: 'cut' | 'fly'`.
+
+**Camera moves** (`push` / `orbit` / `rise`) make a shot live. Ported from
+`render-film.mjs`, which has had a moving camera since the first film while
+every short shipped with a dead one. Relative to the pose the shot settled on,
+so they survive a retune of the step's camera:
+
+| Field | Meaning | Range |
+| --- | --- | --- |
+| `push` | distance multiplier at the END of the shot (<1 pushes in) | 0.85-1.22 |
+| `orbit` | degrees of azimuth travelled over the shot | -25 to 25 |
+| `rise` | vertical offset in world units reached by the end | small |
+
+**Ranges are narrow on purpose and they are hard-won** — the film's first cut
+used `push: 0.72` and ended with the subject half out of frame. A move the
+viewer consciously NOTICES is already too big; the frame should feel alive, not
+the camera perform. Values outside the range are clamped with a warning.
+`verify-video.mjs` projects the END pose of every move and fails a move that
+walks the subject off frame, so a bad one dies in the gate, not in an MP4.
+
+A move on a narrated shot starts only after its fly-to lands (the two must never
+write the camera at once); on a hard cut it starts immediately.
+
+## Sound — the cheapest fidelity in the pipeline
+
+**0 of 68 shipped shorts carried a single sound effect.** The mix stage always
+supported them; there was simply no way for an explainer to declare a cue. There
+is now — the same `sfxLibrary` a film manifest uses, in `video.js`:
+
+```js
+sfxLibrary: {
+  'magnetron-hum': { prompt: 'a deep electrical hum from a vacuum tube, continuous, dry, no reverb', seconds: 8, influence: 0.6 },
+  'door-latch':    { prompt: 'a microwave oven door latch clicking shut, close mic, dry', seconds: 1.5, influence: 0.75 },
+},
+```
+
+Shots reference cues by name: `sfx: [{ file: 'door-latch', at: 0.3 }]` (`at` is
+seconds from the shot's content start). `render.mjs` generates missing cues once,
+up front, before either format — cues are shared by short, long and any film, and
+already-generated ones cost nothing.
+
+Keep prompts **concrete and dry**. Reverb baked into a cue cannot be removed, and
+a dry cue sits under narration far better than a wet one. `make-sfx.mjs <id>`
+warns both ways: a cue a shot references but the library never declares, and a
+declared cue no shot uses.
 
 ## Label targeting — show a callout only while it's discussed
 

@@ -116,6 +116,15 @@ for (const [si, shot] of shots.entries()) {
     continue;
   }
   await page.evaluate((n) => window.__hiw.activate(n), shot.step);
+  // Mirror export-video.mjs: a shot with an explicit `camera` re-aims past
+  // whatever the step's own authored camera is, every shot, including when
+  // activate() was a no-op (consecutive shots sharing a step). Skipping this
+  // left the LIVE camera stale for any solver-framed shot that immediately
+  // follows a camera-pinned one — frameSubject()'s implicit "current camera"
+  // base then solved from wherever the step's own (unrelated) fly-to had
+  // gotten to at the 120ms mark, not from the shot video.js actually asked
+  // for, producing framing-gate failures on shots that render correctly.
+  if (shot.camera) await page.evaluate((pose) => window.__hiw.flyTo(pose, 0), shot.camera);
   await page.waitForTimeout(120);
   if (shot.labels !== undefined) {
     await page.evaluate((wanted) => {
@@ -143,13 +152,70 @@ for (const [si, shot] of shots.entries()) {
     { shot, autoFrame, baseFill, baseBias },
   );
   shotRects.push(rect);
+
+  // A camera MOVE is framed twice or not at all: the solver composed the shot
+  // at its START pose, and a push-in spends the rest of the shot leaving that
+  // composition. Project the END pose too, using the same maths export-video's
+  // applyMove uses at q=1, so a move that walks the subject off the frame fails
+  // here instead of in a finished MP4.
+  if (shot.push != null || shot.orbit != null || shot.rise != null) {
+    const endRect = await page.evaluate(
+      ({ shot, autoFrame, baseFill, baseBias }) => {
+        const base = shot.camera
+          ? shot.camera
+          : autoFrame
+            ? window.__hiw.frameSubject({
+                keys: shot.frame,
+                fill: shot.fill ?? baseFill,
+                bias: shot.bias ?? baseBias,
+              })
+            : null;
+        if (!base) return null;
+        const [px, py, pz] = base.position;
+        const [tx, ty, tz] = base.target;
+        const scale = shot.push ?? 1;
+        const ang = ((shot.orbit ?? 0) * Math.PI) / 180;
+        const vx = px - tx;
+        const vy = py - ty;
+        const vz = pz - tz;
+        const cs = Math.cos(ang);
+        const sn = Math.sin(ang);
+        const rx = vx * cs - vz * sn;
+        const rz = vx * sn + vz * cs;
+        const end = {
+          position: [
+            tx + rx * scale,
+            ty + (vy + (shot.rise ?? 0)) * scale,
+            tz + rz * scale,
+          ],
+          target: [tx, ty, tz],
+        };
+        return window.__hiw.projectSubject({ pose: end, keys: shot.frame });
+      },
+      { shot, autoFrame, baseFill, baseBias },
+    );
+    const moveBucket = shot.camera ? framingWarnings : framingProblems;
+    if (endRect?.cropped) {
+      moveBucket.push(
+        `shot ${si}: move ends cropped (push ${shot.push ?? 1}, orbit ${shot.orbit ?? 0}, rise ${shot.rise ?? 0})`,
+      );
+    } else if (endRect && Math.max(endRect.coverW, endRect.coverH) < MIN_COVER) {
+      moveBucket.push(
+        `shot ${si}: move ends with the subject at only ${(endRect.coverW * 100).toFixed(0)}%w/${(endRect.coverH * 100).toFixed(0)}%h`,
+      );
+    }
+  }
   // A shot that pins its own `camera` is art direction: a deliberate macro that
   // runs past the frame edge is a choice, not a defect, so its problems are
   // reported as warnings. A shot the SOLVER framed has no such excuse — if that
   // one crops or comes out tiny, the pipeline got it wrong and must fail.
   const bucket = shot.camera ? framingWarnings : framingProblems;
   if (!rect) {
-    framingProblems.push(`shot ${si}: no subject geometry found`);
+    // No `frame` override + a step `focus` list with no real mesh behind it
+    // (an anchor-only callout, e.g. a label parented to a bare Object3D) also
+    // yields no subject box on an author-pinned camera — same art-direction
+    // exemption as every other branch below, not a solver failure.
+    bucket.push(`shot ${si}: no subject geometry found`);
     continue;
   }
   // `bias` is the INTENDED lift, so it has to be subtracted out before the

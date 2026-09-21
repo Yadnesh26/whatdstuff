@@ -103,6 +103,27 @@ function stampNarration(format, voice, speed) {
 
 console.log(`render: ${id} — formats [${formats.join(', ')}]${dryRun ? '  (dry run)' : ''}`);
 
+// 0. sound effects ----------------------------------------------------------
+// Format-independent: cues live in assets/sfx/ and are shared by the short, the
+// long and any film that references them, so they are generated ONCE up front
+// rather than per format. Only missing cues cost an API call (make-sfx skips
+// what already exists), so this is a no-op on a re-render.
+//
+// finish-video.mjs has always mixed `shot.sfx` for explainers — the cues simply
+// had no way to be declared, which is why every short so far shipped silent
+// under the voice.
+if (editorial.sfxLibrary && !flag('skip-sfx')) {
+  const missing = Object.keys(editorial.sfxLibrary).filter(
+    (n) => !existsSync(resolve('assets/sfx', `${n}.mp3`)),
+  );
+  if (!missing.length) {
+    console.log(`
+── sfx: CACHED (${Object.keys(editorial.sfxLibrary).length} cues already in assets/sfx)`);
+  } else {
+    step('sfx', 'scripts/make-sfx.mjs', [id]);
+  }
+}
+
 for (const format of formats) {
   const shots = editorial[format]?.shots;
   if (!shots?.length) {
@@ -149,11 +170,18 @@ for (const format of formats) {
   step(`render (${format})`, 'scripts/export-video.mjs', eargs);
 
   // 3. follow overlay -------------------------------------------------------
-  // Composited onto the captioned cut; without captions there is no captioned
-  // file to composite onto, and the overlay's placement was verified against
-  // captioned frames, so the combination is refused rather than guessed at.
+  // Composited onto -final.mp4 (captions burned in AND narration/sfx mixed)
+  // when narration was produced, else onto the silent -captioned.mp4 (a
+  // format with no spoken narration has no -final.mp4 at all). Overlay
+  // placement was verified against captioned frames either way, so either
+  // target frames the same; targeting -captioned.mp4 alone was silently
+  // dropping the audio track on every export that had one (add-follow-
+  // overlay.mjs's own `-map 0:a?` preserves audio when the input has it —
+  // the bug was always handing it a silent input).
   if (follow) {
-    const target = resolve('renders', id, `${format}-captioned.mp4`);
+    const finalPath = resolve('renders', id, `${format}-final.mp4`);
+    const captionedPath = resolve('renders', id, `${format}-captioned.mp4`);
+    const target = !dryRun && existsSync(finalPath) ? finalPath : captionedPath;
     if (!captions) {
       console.log(`\n── follow overlay: skipped — needs captions on (nothing to composite onto)`);
     } else if (!dryRun && !existsSync(target)) {

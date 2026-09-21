@@ -33,6 +33,12 @@ ideas, roughly ordered by educational return per effort.
 
 ## Production
 
+- **Texture realism** — kill the tiled/uniform/flat look of the shared
+  procedural surfaces: consistent texel density, triplanar, per-instance UV
+  variation, GPU-baked FBM/Worley/domain-warp noise to replace the canvas
+  white-noise grain, macro variation, geometry-driven located wear. Stays on
+  WebGLRenderer — no vgpu runtime. Plan:
+  [texture-realism-plan.md](texture-realism-plan.md).
 - **Video export pipeline rebuild** — auto subject framing, deterministic loop
   phase + turntable control (no unwanted rotation), a declarative `render`
   block per explainer, a cached master so caption/wording fixes skip the frame

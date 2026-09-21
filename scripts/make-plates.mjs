@@ -39,12 +39,35 @@ const OUT = 'public/plates';
 // later step frames better WITHOUT changing the in-app camera, pin it here —
 // otherwise a plain `make-plates.mjs` run silently reverts the fix.
 const OVERRIDES = {
+  // step 1 is right, but the default mid-lap frac catches the head halfway
+  // through its turn — window pointing away, so the card is a featureless
+  // black can. frac 0.02 holds it just off zero, window square to camera.
+  lidar: { frac: 0.02 },
+  // step 1 is the shop counter pushed into the right-hand third for the text
+  // panel, so on a panel-less card the left half is dead black and the three
+  // little objects shrink to nothing. Step 2 is the image this explainer is
+  // actually about: the NPCI switch at the centre with the bank vaults on their
+  // radial spokes, filling the frame and legible as one machine at card size.
+  'upi-payments': { step: 2, frac: 0.45 },
+  // step 1 is the SEALED cylinder shot nearly down its own axis: on a
+  // panel-less card that is a gold disc with a key in it, which could be a
+  // door handle or a dial. Step 3 is the cut-away — five spring/driver/key-pin
+  // stacks over the lit shear line — the one frame that says "inside a lock"
+  // at thumbnail size.
+  'pin-tumbler-lock': { step: 3, frac: 0.55 },
   // step 1 is framed for the app: pushed hard right AND dropped down the frame
   // so the hero title clears it, which on a panel-less card leaves the whole
   // upper-left empty. Step 6 is the same complete system from a wider, flatter
   // camera with no drop — Sun, all eight orbits, Saturn's rings legible at card
   // size.
   'solar-system': { step: 6 },
+  // step 1 frames the rig in the right-hand third for the app's text panel, so
+  // on a panel-less card the left half is dead black and the column shrinks to a
+  // sliver. Step 4 is the same rig with the time-rate lattice lit: the stacked
+  // clock planes fill the frame edge to edge and the warm crowding at the bottom
+  // reads as "spacetime, bent" at thumbnail size. frac 0.1 holds the capsule at
+  // the top of the column instead of catching it mid-fall.
+  gravity: { step: 4, frac: 0.1 },
   // step 1 sits the whole machine in the right-hand third - correct in the app,
   // where the text panel owns the left, but it leaves the card half empty.
   // Step 8 is the same sealed, running machine framed wider: aluminium snail,
@@ -61,6 +84,26 @@ const OVERRIDES = {
   // off the die: silver lid, green substrate, colour-coded floorplan — read
   // as "a CPU, opened" at thumbnail size.
   cpu: { step: 3 },
+  // step 1 is the sealed card, and every card-view camera in this explainer is
+  // offset hard right to clear the copy panel — on a panel-less plate that
+  // leaves the left half of the frame empty around a dark slab. Step 3 is the
+  // board with the cooler off, and it fills the frame edge to edge: green PCB,
+  // the bare violet die dead centre, the ring of memory chips, gold PCIe
+  // fingers and the perforated bracket — legible as a graphics card, opened,
+  // at thumbnail size. frac 0.5 catches the sway at dead centre.
+  gpu: { step: 3, frac: 0.5 },
+  // step 1 aims well left of the plant so the copy panel clears it, which on a
+  // panel-less card strands the whole lower-right corner. Step 9 is the same
+  // sealed, running station from the opposite bearing and nearly fills the
+  // frame: containment dome, open turbine hall and cooling-tower plume all
+  // legible left-to-right at thumbnail size.
+  'nuclear-power-plant': { step: 9 },
+  // the plaque is flat, so EVERY camera in this explainer is offset right to
+  // clear the copy panel and none of them re-centre on a panel-less plate.
+  // Step 3 is the tightest of them: the code fills the card edge to edge, all
+  // three finders read, and the mint timing lines and alignment square say
+  // "a QR code, taken apart" rather than just "a QR code".
+  'qr-code': { step: 3, frac: 0.45 },
   // step 1 is the right opening beat but the wrong card: a shut stainless box
   // is a white rectangle that could be an oven, a fridge or a cupboard. Step 2
   // drops the door and rolls the racks out — plates, glasses and the dispenser,

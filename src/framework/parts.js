@@ -10,32 +10,44 @@ import {
   heatBlueMap,
   woodGrainMap,
 } from './textures.js';
+import { enhance } from './surface.js';
 
 // Shared material presets so explainers look like one family.
+//
+// The v2 physical presets take an optional trailing `fx` object forwarded to
+// surface.enhance() — opt-in per explainer, no effect unless passed:
+//   materials.aluminum(0xb9c0c8, { triplanar: { scale: 1.3 }, macro: true })
+// keys: triplanar | detail | macro | wear  (value = that helper's opts, or true)
 export const materials = {
   // --- v2 physical presets (use for new/upgraded explainers) ---------------
   // aluminum/brushedSteel carry both a roughnessMap (large-scale grain) AND a
   // normalMap (the same grain as actual micro-bumps) — roughness alone reads
   // flat under raking light; the normal map is what makes each bump catch or
   // lose the highlight as the camera orbits.
-  aluminum: (color = 0xb9c0c8) =>
-    new THREE.MeshPhysicalMaterial({
-      color,
-      metalness: 1,
-      roughness: 0.42,
-      roughnessMap: castMap(),
-      normalMap: castNormalMap(),
-      normalScale: new THREE.Vector2(0.35, 0.35),
-    }),
-  brushedSteel: (color = 0xc6ccd4) =>
-    new THREE.MeshPhysicalMaterial({
-      color,
-      metalness: 1,
-      roughness: 0.3,
-      roughnessMap: brushedMap(),
-      normalMap: brushedNormalMap(),
-      normalScale: new THREE.Vector2(0.4, 0.4),
-    }),
+  aluminum: (color = 0xb9c0c8, fx) =>
+    enhance(
+      new THREE.MeshPhysicalMaterial({
+        color,
+        metalness: 1,
+        roughness: 0.42,
+        roughnessMap: castMap(),
+        normalMap: castNormalMap(),
+        normalScale: new THREE.Vector2(0.35, 0.35),
+      }),
+      fx,
+    ),
+  brushedSteel: (color = 0xc6ccd4, fx) =>
+    enhance(
+      new THREE.MeshPhysicalMaterial({
+        color,
+        metalness: 1,
+        roughness: 0.3,
+        roughnessMap: brushedMap(),
+        normalMap: brushedNormalMap(),
+        normalScale: new THREE.Vector2(0.4, 0.4),
+      }),
+      fx,
+    ),
   chrome: (color = 0xd8dde3) =>
     new THREE.MeshPhysicalMaterial({ color, metalness: 1, roughness: 0.09 }),
   // Brushed metal with the anisotropic stretched-highlight [VALIDATED,
@@ -47,7 +59,7 @@ export const materials = {
   // brushing direction, pass 0. Always eyeball a close-up screenshot before
   // trusting the rotation — perpendicular-to-grain stretch looks wrong
   // instantly, per the polish-explainer skill.
-  anisoSteel: (color = 0xc6ccd4, rotation = 0) => {
+  anisoSteel: (color = 0xc6ccd4, rotation = 0, fx) => {
     const mat = new THREE.MeshPhysicalMaterial({
       color,
       metalness: 1,
@@ -58,16 +70,19 @@ export const materials = {
       anisotropy: 0.7,
       anisotropyRotation: rotation,
     });
-    return mat;
+    return enhance(mat, fx);
   },
-  paintedMetal: (color) =>
-    new THREE.MeshPhysicalMaterial({
-      color,
-      metalness: 0.25,
-      roughness: 0.42,
-      clearcoat: 1,
-      clearcoatRoughness: 0.14,
-    }),
+  paintedMetal: (color, fx) =>
+    enhance(
+      new THREE.MeshPhysicalMaterial({
+        color,
+        metalness: 0.25,
+        roughness: 0.42,
+        clearcoat: 1,
+        clearcoatRoughness: 0.14,
+      }),
+      fx,
+    ),
   rubber: (color = 0x1c1e22) =>
     new THREE.MeshPhysicalMaterial({ color, metalness: 0, roughness: 0.95 }),
   // matte moulded polymer — tool/appliance/firearm housings. Distinct from
@@ -76,14 +91,17 @@ export const materials = {
   // so it reads as a dry moulded body rather than wet-looking plastic. A low
   // clearcoat (0.15) also lets it ghost correctly on reveal — a high coat
   // renders at full strength regardless of opacity and reads solid.
-  polymer: (color = 0x23262c) =>
-    new THREE.MeshPhysicalMaterial({
-      color,
-      metalness: 0,
-      roughness: 0.74,
-      clearcoat: 0.15,
-      clearcoatRoughness: 0.62,
-    }),
+  polymer: (color = 0x23262c, fx) =>
+    enhance(
+      new THREE.MeshPhysicalMaterial({
+        color,
+        metalness: 0,
+        roughness: 0.74,
+        clearcoat: 0.15,
+        clearcoatRoughness: 0.62,
+      }),
+      fx,
+    ),
   // Real refractive optical glass — lens elements, cover glass, anything you
   // look THROUGH [VALIDATED, 2026-08-05, dslr-camera lens elements]. Uses
   // transmission rather than faked opacity, so what sits behind it is genuinely
@@ -125,18 +143,21 @@ export const materials = {
   // of scattering evenly, for housings that sit low and collect it (sumps,
   // crankcases). Pair with geometry whose UV "down" is the part's actual
   // underside.
-  grimyAluminum: (color = 0xb9c0c8) =>
-    new THREE.MeshPhysicalMaterial({
-      color,
-      metalness: 1,
-      // roughnessMap MULTIPLIES this — grime texels average ~0.6, so 0.9
-      // lands at ~0.55 effective. Lower values turn large flat bases into
-      // softbox mirrors.
-      roughness: 0.9,
-      roughnessMap: grimeMap(),
-      normalMap: castNormalMap(),
-      normalScale: new THREE.Vector2(0.12, 0.12),
-    }),
+  grimyAluminum: (color = 0xb9c0c8, fx) =>
+    enhance(
+      new THREE.MeshPhysicalMaterial({
+        color,
+        metalness: 1,
+        // roughnessMap MULTIPLIES this — grime texels average ~0.6, so 0.9
+        // lands at ~0.55 effective. Lower values turn large flat bases into
+        // softbox mirrors.
+        roughness: 0.9,
+        roughnessMap: grimeMap(),
+        normalMap: castNormalMap(),
+        normalScale: new THREE.Vector2(0.12, 0.12),
+      }),
+      fx,
+    ),
   // heat-blued steel for exhaust parts: straw-gold at the hot end fading
   // through purple/blue to cold dark steel — colour driven entirely by a
   // gradient texture, no per-part tinting needed. direction 'u' suits
@@ -269,6 +290,52 @@ export function chargeQueue(curve, count = 6, color = 0x6ea8ff, opts = {}) {
   }
   setFront(0);
   return { group, dots, setFront };
+}
+
+// A field of `count` identical flow arrows drawn as ONE InstancedMesh — the
+// shape every fluid-loop explainer had been building as N separate Meshes (84
+// of them in nuclear-power-plant, about a fifth of that scene's draw calls).
+// Per-instance position, orientation, scale and COLOUR; opacity is shared,
+// because three's instancing has no per-instance alpha — which is fine for a
+// packet stream, where every packet is equally opaque.
+//
+// MeshBasic, not the emissive `glow` preset: the stage's bloom threshold is
+// 2.2 (HDR), so a packet's emissive never reached it anyway, and a flat bright
+// chip reads more like an energy marker than a lit cone does.
+//
+//   const field = flowField(40, 0.055);
+//   group.add(field.mesh);
+//   field.set(i, pos, quat, scale, colour);   // per frame
+//   field.commit();                           // once, after the loop
+export function flowField(count, size = 0.07, { opacity = 0.9 } = {}) {
+  const geo = new THREE.ConeGeometry(size * 0.5, size, 12);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity,
+    depthWrite: false, // a faded packet must never punch a hole through glass
+  });
+  const mesh = new THREE.InstancedMesh(geo, mat, count);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  // an InstancedMesh's bounding sphere comes from the GEOMETRY, not from where
+  // the instances actually sit, so a stream spread across a whole scene gets
+  // culled as if it were one cone at the origin
+  mesh.frustumCulled = false;
+  const _m = new THREE.Matrix4();
+  const _s = new THREE.Vector3();
+  const _c = new THREE.Color();
+  for (let i = 0; i < count; i++) mesh.setColorAt(i, _c.setHex(0xffffff));
+
+  function set(i, position, quaternion, scale, color) {
+    _m.compose(position, quaternion, _s.setScalar(scale));
+    mesh.setMatrixAt(i, _m);
+    if (color) mesh.setColorAt(i, color);
+  }
+  function commit() {
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+  return { mesh, material: mat, set, commit };
 }
 
 // Standard charcoal display plinth every product-shot explainer stands on.

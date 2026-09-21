@@ -82,6 +82,30 @@ develops the same beats with more room to breathe.
   abstract noun; a specific number over a vague claim ("boils water in 90
   seconds" beats "cooks fast").
 
+## Write the PICTURE, not just the words
+
+The script owns the cut now, not just the voiceover. A spoken line is a **beat**,
+and a beat can carry several shots — so for every line, also decide what the
+viewer SEES while it is spoken. Write those as silent shots (no `narration`)
+under the line they belong to; `export-content` owns the syntax.
+
+Why this is now your job: shots used to be 1:1 with spoken lines, which held the
+picture still for a median of 8.8 seconds across 55 shipped shorts. A short that
+holds one angle for nine seconds is scrolled past regardless of how good the
+sentence is.
+
+- **Two to four visuals per spoken line.** Name them while drafting: "the wire
+  glowing" / "electrons peeling off" / "the spoke sweeping the cavities".
+- **The stat gets a hard cut**, not a glide. Isolate it visually as well as
+  verbally — new angle, tight, on the beat the number lands.
+- **Re-hooks are cuts.** "Here's the part that gets me" should coincide with a
+  change of scale, not just a change of sentence.
+- **Cutting is free; re-recording is not.** Silent shots do not re-synthesize the
+  take, so the picture can be re-cut against an approved voiceover as many times
+  as you like. Never re-word a line just to change what is on screen.
+- Silent shots cost no words, so they do not change the ~2.3 words/sec length
+  budget. A 70s short with 25 shots has the same script as one with 8.
+
 ## Voice: modern register, earned slang only
 
 Priority order for this project: intuitive and easy to understand, then
@@ -151,6 +175,8 @@ allowed one short, emphatic sentence; only a *run* of them is a defect.
 - **Button ≤8 words, quotable, closes the loop.** End on the callback — not a new
   fact, and not "like & subscribe."
 - **Never paste the step body copy** — it's written for reading, not listening.
+- **Every spoken line has its visuals decided** (2-4 per line), written as silent
+  shots. A line with one static shot behind it is an unfinished line.
 - **Any slang passes the sweet-spot test** (literally true about the
   mechanism) and the narrator-voice test, or it gets cut — see "Voice"
   above. No em/en dashes anywhere (humanizer pass, same section).

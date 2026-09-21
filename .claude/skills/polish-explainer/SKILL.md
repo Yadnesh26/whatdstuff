@@ -67,6 +67,25 @@ browser, which is where a heavy scene tips over); and instanced greebling is
 what makes rung 1 nearly free — `website` added hinge barrels, feet, rack rail
 holes and lathed platters for +13 draw calls total.
 
+CONFIRMED again (nuclear-power-plant, 2026-09-12): baseline 10.2 ms worst step /
+424 calls — at the ceiling, so the pass opened here. The biggest single source
+was FLOW PACKETS: 84 separate Meshes (40 primary + 44 secondary) riding two
+fluid loops. These instance cleanly because a packet stream needs per-instance
+position/orientation/scale/COLOUR but not per-instance alpha — every packet is
+equally opaque. Now `parts.flowField(count, size, {opacity})`, which any
+fluid-loop explainer can use (coal-power-plant, refrigerator, rocket-engine all
+build the same shape by hand). With CRDM housings, control-rod spiders, and a
+condenser tube sheet that was allocating a fresh CircleGeometry PER DOT also
+instanced: 424 -> 275 calls. Note what this did NOT fix: per-step timings barely
+moved between a 130-call step and a 275-call one, which is the signature of a
+scene that is fill-rate bound on the post chain (GTAO + bloom + DoF at 1280x800)
+rather than draw-call bound. Check that ratio before spending a second
+instancing pass — past that point only fragment cost matters.
+CAUTION on `geometry.boltCircle()`: it emits one Mesh per bolt, so it is the
+wrong tool in a scene near the ceiling. It is used by ~15 explainers, so do not
+convert it to an InstancedMesh in the middle of a single explainer's pass —
+build the ring instanced locally and leave the shared helper alone.
+
 ### Rung 1 — Fillets and micro-detail [VALIDATED pattern]
 
 Nothing real has a sharp edge; bevels catching light are the single biggest
@@ -221,6 +240,27 @@ the existing `brushedMap`/`grimeMap` style):
   around fasteners). Uniform noise reads as dirt; located wear reads as use.
 - Keep it at 10–20% visibility. If a screenshot round says "looks dirty",
   halve it.
+
+**Architectural concrete** [VALIDATED — nuclear-power-plant (2026-09-12)]:
+`textures.concreteAlbedoMap()`. A power-station scene is mostly two enormous
+pale shells (containment dome, cooling tower) and untextured they read as
+smooth white plastic — the loudest born-in-a-computer tell in that model.
+Pour-lift construction joints, rain streaking below them, and broad curing
+blotches fix it.
+THE FINDING THAT MATTERS: it must be the COLOUR map. Roughness and normal maps
+of the exact same structure were built first and were completely invisible —
+a 3px joint is sub-pixel once tiled across a building, and at roughness ~0.9
+there is essentially no specular left for a roughnessMap to modulate. Albedo is
+the only channel that carries a large surface at distance. (Fingerprint/smudge
+maps are the opposite case and stay on the coat — they live on things you touch,
+at macro distance.) The roughness/normal variants were dropped, not because they
+cost much, but because they contributed nothing.
+Two tuning traps, both cost a screenshot round: (a) at `repeat.y > 1` each
+tile's vertical streaks stack onto the tile below and the pair reads as
+continuous FLUTING — keep vertical tiling at 1 on a tall shell and vary only
+`repeat.x`; (b) the first strength that looked right in the canvas was roughly
+3x too strong on the model. Both are the skill's own "if it looks dirty, halve
+it" rule, and both still needed the screenshot to catch.
 
 ### Rung 4 — Per-step cinematography
 
@@ -386,6 +426,21 @@ dslr-camera an unwarmed first step reported 34-84 ms and a warmed one 5 ms,
 same code. Timings still swing run to run in headless/SwiftShader (see the
 transmission note above); draw calls and triangle counts are deterministic and
 are the numbers to trust when timings disagree.
+
+TWO MEASUREMENT PRECONDITIONS, both learned the hard way on nuclear-power-plant
+(2026-09-12), and a wrong reading here sends you optimising the wrong thing:
+1. Playwright's DEFAULT launch has no GPU at all (see the headless-GPU note in
+   the project memory) — it reported ~1500 ms/frame for a scene that runs at
+   ~9 ms. Pass `channel: 'chromium'` plus `--enable-gpu --use-angle=d3d11
+   --ignore-gpu-blocklist`, and ALWAYS print `UNMASKED_RENDERER_WEBGL` beside
+   the timings so a SwiftShader run is obvious in the output.
+2. Check the machine is idle. At 73% background CPU (an IDE and a browser), the
+   same unchanged scene measured 9.2 ms and then 34.4 ms, and a concrete map was
+   blamed for a 3.7x "regression" it had not caused — an A/B with the map
+   disabled showed a 3% difference. When timings and the DETERMINISTIC numbers
+   disagree, believe draw calls and triangles: those said +6 calls / +2.5%
+   triangles, i.e. nothing had regressed. Re-measure on a quiet machine before
+   reverting anything on timing evidence alone.
 
 Budget: **≤ 10 ms average** (leaves headroom for animation + labels at 60fps
 on mid-range GPUs). Measure BEFORE starting the ladder to get the model's

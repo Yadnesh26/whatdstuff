@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { bakeTexture } from './noise-bake.js';
 
-// Procedural surface maps — canvas-generated, cached, zero downloaded assets.
+// Procedural surface maps — zero downloaded assets, cached.
 // Two realism gaps these close:
 //  1. Perfectly uniform roughness is a dead giveaway of CG — brushedMap/castMap
 //     break it with grain, but a flat surface with only roughness variation
@@ -9,6 +10,12 @@ import * as THREE from 'three';
 //  2. Uniform noise still looks generated — real wear is LOCATED (grime pools
 //     at the bottom of a case, gets rubbed off high-touch edges). grimeMap
 //     biases its blotches toward one edge instead of scattering evenly.
+//
+// The grain-bearing maps (brushed/cast/grime + detail/dust/macro) are now
+// GPU-baked FBM / Worley / domain-warp via noise-bake.js — non-periodic across
+// the tile, so a large flat surface no longer shows an obvious repeat (see
+// docs/texture-realism-plan.md Phase 2). Each keeps its old canvas generator as
+// a fallback for any context without a GL bake renderer.
 
 const cache = new Map();
 
@@ -21,6 +28,85 @@ function canvasTexture(key, w, h, draw) {
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   cache.set(key, tex);
+  return tex;
+}
+
+// Architectural cast concrete (use as the colour `map`) — for the big shells a
+// power-station scene is mostly made of: containment domes, cooling towers.
+// Three things make a large concrete surface read as a STRUCTURE rather than a
+// grey shape: the horizontal construction joints between pour lifts, the rain
+// streaking that runs down from each joint, and broad tonal blotching from
+// uneven curing.
+//
+// ALBEDO ONLY, deliberately. Roughness and normal maps of the same structure
+// were built first and measured: on a near-diffuse surface at building scale
+// neither survives to the pixel (a 3px joint is sub-pixel once tiled, and there
+// is almost no specular left at roughness ~0.9 for a roughnessMap to modulate),
+// while the three fetches together cost 9 -> 35 ms/frame on two frame-filling
+// shells. Colour is the only channel that carries at this distance.
+//
+// Near-white base, so a material's own `color` still sets the overall tone.
+// Tiles seamlessly across X (the wrap direction on a lathe); callers set
+// `repeat` to suit the surface's real size — note that a repeat.y above 1
+// stacks each tile's streaks onto the tile below and the pair reads as one
+// continuous rib, so keep vertical tiling at 1 on a tall shell.
+export function concreteAlbedoMap() {
+  if (cache.has('concrete-albedo')) return cache.get('concrete-albedo');
+  const w = 256;
+  const h = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ececec';
+  ctx.fillRect(0, 0, w, h);
+
+  // broad curing blotches, wrapped in X so the tile joins cleanly
+  for (let i = 0; i < 22; i++) {
+    const x = Math.random() * w;
+    const y = Math.random() * h;
+    const r = 20 + Math.random() * 55;
+    const v = 150 + Math.random() * 60;
+    for (const dx of [0, -w, w]) {
+      const g = ctx.createRadialGradient(x + dx, y, 0, x + dx, y, r);
+      g.addColorStop(0, `rgba(${v},${v},${v},0.16)`);
+      g.addColorStop(1, `rgba(${v},${v},${v},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(x + dx - r, y - r, r * 2, r * 2);
+    }
+  }
+
+  // construction joints between pour lifts, and the rain streaks below them
+  const LIFTS = 4;
+  for (let k = 0; k < LIFTS; k++) {
+    const ly = (k / LIFTS) * h;
+    ctx.fillStyle = 'rgba(150,152,155,0.45)';
+    ctx.fillRect(0, ly, w, 2);
+    ctx.fillStyle = 'rgba(238,238,238,0.28)';
+    ctx.fillRect(0, ly + 2, w, 2);
+    for (let i = 0; i < 13; i++) {
+      const x = Math.random() * w;
+      const sw = 2 + Math.random() * 7;
+      const sh = 15 + Math.random() * 50;
+      const g = ctx.createLinearGradient(0, ly, 0, ly + sh);
+      g.addColorStop(0, 'rgba(126,129,133,0.14)');
+      g.addColorStop(1, 'rgba(126,129,133,0)');
+      ctx.fillStyle = g;
+      for (const dx of [0, -w, w]) ctx.fillRect(x + dx, ly, sw, sh);
+    }
+  }
+
+  // aggregate speckle
+  for (let i = 0; i < 1800; i++) {
+    const v = 150 + Math.random() * 90;
+    ctx.fillStyle = `rgba(${v},${v},${v},0.3)`;
+    ctx.fillRect(Math.random() * w, Math.random() * h, 1.5, 1.5);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  cache.set('concrete-albedo', tex);
   return tex;
 }
 
@@ -61,39 +147,72 @@ function heightToNormal(heightCanvas, strength = 1.6) {
   return out;
 }
 
-// Horizontal brushed-metal streaks (use as roughnessMap).
+// Horizontal brushed-metal streaks (use as roughnessMap). GPU-baked anisotropic
+// FBM — many lattice cells along X, few along Y — with the canvas streak
+// generator kept as a fallback. Low contrast on purpose: FBM is smoother than
+// the old random-arc white noise, so effective roughness variance drops, which
+// is SAFE for the clipped-pixel budget.
 export function brushedMap() {
-  return canvasTexture('brushed', 256, 256, (ctx, w, h) => {
-    ctx.fillStyle = '#888';
-    ctx.fillRect(0, 0, w, h);
-    for (let i = 0; i < 900; i++) {
-      const y = Math.random() * h;
-      const v = 100 + Math.floor(Math.random() * 90);
-      ctx.strokeStyle = `rgba(${v},${v},${v},0.5)`;
-      ctx.lineWidth = 0.6 + Math.random();
-      ctx.beginPath();
-      const x0 = Math.random() * w;
-      ctx.moveTo(x0, y);
-      ctx.lineTo(x0 + 30 + Math.random() * 120, y + (Math.random() - 0.5) * 1.5);
-      ctx.stroke();
-    }
+  if (cache.has('brushed')) return cache.get('brushed');
+  // Conservative shaping: mean roughness held ABOVE the old canvas `#888` base
+  // (0.53) and contrast kept low, so on polished-metal close-ups the map never
+  // dips shinier than the canvas version did — verified against mechanical-watch
+  // (the strictest clipped-pixel pilot).
+  const baked = bakeTexture('brushed', {
+    kind: 'fbm',
+    freq: [96, 10],
+    octaves: 5,
+    gain: 0.5,
+    contrast: 0.22,
+    mid: 0.6,
   });
+  const tex =
+    baked ??
+    canvasTexture('brushed-canvas', 256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#888';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 900; i++) {
+        const y = Math.random() * h;
+        const v = 100 + Math.floor(Math.random() * 90);
+        ctx.strokeStyle = `rgba(${v},${v},${v},0.5)`;
+        ctx.lineWidth = 0.6 + Math.random();
+        ctx.beginPath();
+        const x0 = Math.random() * w;
+        ctx.moveTo(x0, y);
+        ctx.lineTo(x0 + 30 + Math.random() * 120, y + (Math.random() - 0.5) * 1.5);
+        ctx.stroke();
+      }
+    });
+  cache.set('brushed', tex);
+  return tex;
 }
 
-// Blotchy casting grain (use as roughnessMap on cast housings).
+// Blotchy casting grain (use as roughnessMap on cast housings). GPU-baked
+// Worley pebble + fine FBM; canvas dot-spray fallback.
 export function castMap() {
-  return canvasTexture('cast', 256, 256, (ctx, w, h) => {
-    ctx.fillStyle = '#7d7d7d';
-    ctx.fillRect(0, 0, w, h);
-    for (let i = 0; i < 2600; i++) {
-      const v = 90 + Math.floor(Math.random() * 90);
-      ctx.fillStyle = `rgba(${v},${v},${v},0.35)`;
-      const r = 1 + Math.random() * 3.5;
-      ctx.beginPath();
-      ctx.arc(Math.random() * w, Math.random() * h, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
+  if (cache.has('cast')) return cache.get('cast');
+  const baked = bakeTexture('cast', {
+    kind: 'worley',
+    freq: [9, 9],
+    contrast: 0.24,
+    mid: 0.6,
   });
+  const tex =
+    baked ??
+    canvasTexture('cast-canvas', 256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#7d7d7d';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 2600; i++) {
+        const v = 90 + Math.floor(Math.random() * 90);
+        ctx.fillStyle = `rgba(${v},${v},${v},0.35)`;
+        const r = 1 + Math.random() * 3.5;
+        ctx.beginPath();
+        ctx.arc(Math.random() * w, Math.random() * h, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+  cache.set('cast', tex);
+  return tex;
 }
 
 // Fine directional grooves as an actual normal map — the micro-ridges that
@@ -102,25 +221,38 @@ export function castMap() {
 export function brushedNormalMap() {
   const cached = cache.get('brushed-normal');
   if (cached) return cached;
-  const height = document.createElement('canvas');
-  height.width = height.height = 256;
-  const ctx = height.getContext('2d');
-  ctx.fillStyle = '#808080';
-  ctx.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 700; i++) {
-    const y = Math.random() * 256;
-    const v = 90 + Math.floor(Math.random() * 130);
-    ctx.strokeStyle = `rgb(${v},${v},${v})`;
-    ctx.lineWidth = 0.5 + Math.random() * 0.8;
-    ctx.beginPath();
-    const x0 = Math.random() * 256;
-    ctx.moveTo(x0, y);
-    ctx.lineTo(x0 + 40 + Math.random() * 140, y + (Math.random() - 0.5) * 1.2);
-    ctx.stroke();
+  const baked = bakeTexture('brushed-normal', {
+    kind: 'normal',
+    profile: 'fbm',
+    freq: [96, 10],
+    octaves: 5,
+    gain: 0.5,
+    // gentler than the old Sobel-from-canvas (2.2): baked gradients are cleaner
+    // and were over-glinting near-mirror parts on the watch pilot
+    normalStrength: 1.15,
+  });
+  let tex = baked;
+  if (!tex) {
+    const height = document.createElement('canvas');
+    height.width = height.height = 256;
+    const ctx = height.getContext('2d');
+    ctx.fillStyle = '#808080';
+    ctx.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 700; i++) {
+      const y = Math.random() * 256;
+      const v = 90 + Math.floor(Math.random() * 130);
+      ctx.strokeStyle = `rgb(${v},${v},${v})`;
+      ctx.lineWidth = 0.5 + Math.random() * 0.8;
+      ctx.beginPath();
+      const x0 = Math.random() * 256;
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x0 + 40 + Math.random() * 140, y + (Math.random() - 0.5) * 1.2);
+      ctx.stroke();
+    }
+    const normalCanvas = heightToNormal(height, 2.2);
+    tex = new THREE.CanvasTexture(normalCanvas);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   }
-  const normalCanvas = heightToNormal(height, 2.2);
-  const tex = new THREE.CanvasTexture(normalCanvas);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   cache.set('brushed-normal', tex);
   return tex;
 }
@@ -131,22 +263,31 @@ export function brushedNormalMap() {
 export function castNormalMap() {
   const cached = cache.get('cast-normal');
   if (cached) return cached;
-  const height = document.createElement('canvas');
-  height.width = height.height = 256;
-  const ctx = height.getContext('2d');
-  ctx.fillStyle = '#808080';
-  ctx.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 1800; i++) {
-    const v = 90 + Math.floor(Math.random() * 130);
-    ctx.fillStyle = `rgb(${v},${v},${v})`;
-    const r = 1.5 + Math.random() * 4;
-    ctx.beginPath();
-    ctx.arc(Math.random() * 256, Math.random() * 256, r, 0, Math.PI * 2);
-    ctx.fill();
+  const baked = bakeTexture('cast-normal', {
+    kind: 'normal',
+    profile: 'worley',
+    freq: [9, 9],
+    normalStrength: 0.8,
+  });
+  let tex = baked;
+  if (!tex) {
+    const height = document.createElement('canvas');
+    height.width = height.height = 256;
+    const ctx = height.getContext('2d');
+    ctx.fillStyle = '#808080';
+    ctx.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 1800; i++) {
+      const v = 90 + Math.floor(Math.random() * 130);
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      const r = 1.5 + Math.random() * 4;
+      ctx.beginPath();
+      ctx.arc(Math.random() * 256, Math.random() * 256, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const normalCanvas = heightToNormal(height, 1.4);
+    tex = new THREE.CanvasTexture(normalCanvas);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   }
-  const normalCanvas = heightToNormal(height, 1.4);
-  const tex = new THREE.CanvasTexture(normalCanvas);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   cache.set('cast-normal', tex);
   return tex;
 }
@@ -156,28 +297,85 @@ export function castNormalMap() {
 // the located-wear look of an engine case that actually sees oil and grip.
 // Use as a roughnessMap (grime reads rougher/duller) or blended into color.
 export function grimeMap() {
-  return canvasTexture('grime', 256, 256, (ctx, w, h) => {
-    ctx.fillStyle = '#8f8f8f';
-    ctx.fillRect(0, 0, w, h);
-    for (let i = 0; i < 500; i++) {
-      // bias y toward the bottom edge with a squared random — most blotches
-      // land low, fewer stray upward, none appear at the very top.
-      // Blotches are drawn LIGHT: in a roughnessMap, lighter = rougher, and
-      // grime dulls a surface — dark blotches would read as polished spots.
-      const t = Math.pow(Math.random(), 0.45);
-      const y = h * (0.35 + t * 0.65);
-      const x = Math.random() * w;
-      const r = 3 + Math.random() * 14 * t;
-      const light = 200 + Math.random() * 55;
-      const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-      grad.addColorStop(0, `rgba(${light},${light},${light},0.5)`);
-      grad.addColorStop(1, `rgba(${light},${light},${light},0)`);
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
+  if (cache.has('grime')) return cache.get('grime');
+  const baked = bakeTexture('grime', {
+    kind: 'grime',
+    freq: [5, 5],
+    warp: 0.32,
+    biasDir: [0, 1],
+    biasAmt: 0.85,
   });
+  const tex =
+    baked ??
+    canvasTexture('grime-canvas', 256, 256, (ctx, w, h) => {
+      ctx.fillStyle = '#8f8f8f';
+      ctx.fillRect(0, 0, w, h);
+      for (let i = 0; i < 500; i++) {
+        // bias y toward the bottom edge with a squared random — most blotches
+        // land low, fewer stray upward, none appear at the very top.
+        // Blotches are drawn LIGHT: in a roughnessMap, lighter = rougher, and
+        // grime dulls a surface — dark blotches would read as polished spots.
+        const t = Math.pow(Math.random(), 0.45);
+        const y = h * (0.35 + t * 0.65);
+        const x = Math.random() * w;
+        const r = 3 + Math.random() * 14 * t;
+        const light = 200 + Math.random() * 55;
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, `rgba(${light},${light},${light},0.5)`);
+        grad.addColorStop(1, `rgba(${light},${light},${light},0)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+  cache.set('grime', tex);
+  return tex;
+}
+
+// --- Phase 1/3 shared maps (GPU-baked; used by src/framework/surface.js) -----
+
+// Higher-frequency isotropic normal detail, layered on top of the base grain by
+// surface.detailNormal() to break the single-scale look. 256² is plenty.
+export function detailNormalMap() {
+  if (cache.has('detail-normal')) return cache.get('detail-normal');
+  const tex = bakeTexture('detail-normal', {
+    size: 256,
+    kind: 'normal',
+    profile: 'fbm',
+    freq: [40, 40],
+    octaves: 4,
+    gain: 0.55,
+    normalStrength: 1.2,
+  });
+  cache.set('detail-normal', tex);
+  return tex;
+}
+
+// Low-frequency field for surface.macroVariation() — large soft unevenness so a
+// big flat panel drifts in tint/roughness instead of reading as one CG value.
+export function macroFieldTexture() {
+  if (cache.has('macro-field')) return cache.get('macro-field');
+  const tex = bakeTexture('macro-field', {
+    size: 128,
+    kind: 'fbm',
+    freq: [3, 3],
+    octaves: 3,
+    gain: 0.6,
+    contrast: 1.0,
+    mid: 0.5,
+  });
+  cache.set('macro-field', tex);
+  return tex;
+}
+
+// Sparse pale dust speckle for up-facing surfaces (Rung 3). Not wired into any
+// preset — compose it into a roughness canvas or use as a light overlay.
+export function dustMap() {
+  if (cache.has('dust')) return cache.get('dust');
+  const tex = bakeTexture('dust', { size: 256, kind: 'speckle', freq: [8, 8] });
+  cache.set('dust', tex);
+  return tex;
 }
 
 // Polymer grip stipple: a jittered grid of small raised dots, as a normal map

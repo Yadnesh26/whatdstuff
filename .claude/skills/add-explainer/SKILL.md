@@ -11,8 +11,9 @@ description: Add a new 3D explainer to the whatdstuff site (e.g. "how an AC work
 ## What an explainer is
 
 One folder in `src/explainers/<kebab-id>/`, zero registration (the registry
-globs it): `meta.js` (tiny eager library-card data — id MUST equal the folder
-name), `index.js` (`defineExplainer({ ...meta, buildScene, steps })`, lazy
+globs it): `story.js` (the angle/stat/beats
+contract, written FIRST — see Phase 0), `meta.js` (tiny eager library-card data
+— id MUST equal the folder name), `index.js` (`defineExplainer({ ...meta, buildScene, steps })`, lazy
 per-explainer Vite chunk), `model.js` (the procedural Three.js build; no GLB
 assets, ever). `categories` is an array; the folder tree lives in
 `src/categories.js`. The framework provides page layout, step activation,
@@ -53,12 +54,60 @@ gotchas live there. This core file is the process; that file is the craft.
 
 ## Workflow
 
+### Phase 0 — Story FIRST (the inversion)
+
+**Write the story before the model exists.** The old order built the model,
+froze its steps, and only then wrote a script at stage 5 — so the script could
+never ask for a shot the model couldn't already make, and it never did. The
+result reads as a narrated tour of a scroll page rather than a film.
+
+So the FIRST artifact is `src/explainers/<id>/story.js` — a pure data module,
+no imports, never bundled into the app (only tooling and you read it):
+
+```js
+export default {
+  angle:  'The counterintuitive TRUE claim this is about. Not the topic.',
+  stat:   'The single most surprising number, with its unit.',
+  button: 'The closing callback, <=8 words. Also the loop to plant.',
+  who:    'The person who stops scrolling for this.',
+  beats: [
+    {
+      idea: 'One sentence — what this beat teaches.',
+      // What the viewer must SEE. This is a CONTRACT the model must satisfy.
+      visuals: ['the sealed switch on a wall', 'the contact snapping shut'],
+    },
+  ],
+};
+```
+
+Rules that make this worth doing:
+
+1. **`visuals` is a contract, not a wish.** Every entry must end up buildable and
+   on screen. A script written before the model can promise shots the procedural
+   model cannot deliver — that failure surfaces at render time, after the model
+   is built, which is WORSE than the problem this replaces. So:
+2. **The union of every beat's `visuals` is the model's requirement list.** The
+   Phase 1 Blueprint derives its storyboard from `story.js`, not the other way
+   round. If a visual turns out to be unbuildable, change `story.js` deliberately
+   and say so — never silently drop it and build what is convenient.
+3. **Beats are not steps.** A beat is an idea; a step is a scroll chapter; a shot
+   is a camera setup. One beat usually becomes one step and 2-4 shots.
+4. **The angle outranks the mechanism's tidiness.** "Your fridge doesn't make
+   cold" and "how a fridge works" are the same physics and different products.
+5. If the user's request already states the angle and the stat, that IS the
+   story — confirm deltas in one line and move on.
+
+`story.js` stays in the folder afterwards as the record of what the explainer is
+FOR. `video-scripting` reads it instead of reverse-engineering intent from step
+copy, and a later rework can tell a taste change from a drift.
+
 ### Phase 1 — Blueprint (one round-trip, in chat)
 
 Research the mechanism FIRST (WebSearch + WebFetch a canonical source; batch
 independent searches in ONE message; do not hallucinate mechanisms). Then, in
 the SAME message as the research summary, post the Blueprint as ~15 tight
-bullet lines — in chat, not an artifact — covering:
+bullet lines — in chat, not an artifact — covering (the storyboard and the
+callout list must SATISFY `story.js`'s `visuals`, per Phase 0):
 1. mechanism facts with real numbers (counts, sizes, speeds, colors)
 2. proportions/ratios + the main geometry constants
 3. state scalars + seamless-loop math (whole cycles per lap, geared ratios)

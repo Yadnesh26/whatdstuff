@@ -165,10 +165,17 @@ function masterInputsHash() {
   // No editorial means the shot list is derived from the live step count, which
   // this stage cannot know without booting the page — so don't pretend to cache.
   if (!editorial?.[format]?.shots) return null;
-  const framingFields = ['step', 'seconds', 'speed', 'dolly', 'camera', 'fill', 'bias', 'frame', 'labels'];
-  const shots = editorial[format].shots.map((s) =>
-    Object.fromEntries(framingFields.filter((k) => s[k] !== undefined).map((k) => [k, s[k]])),
-  );
+  // `narration` is here ONLY as a presence flag (below): whether a shot is
+  // narrated decides its beat, and therefore its duration and whether it cuts.
+  // The wording itself still must not bust the master cache.
+  const framingFields = [
+    'step', 'seconds', 'speed', 'dolly', 'camera', 'fill', 'bias', 'frame', 'labels',
+    'push', 'orbit', 'rise', 'move',
+  ];
+  const shots = editorial[format].shots.map((s) => ({
+    ...Object.fromEntries(framingFields.filter((k) => s[k] !== undefined).map((k) => [k, s[k]])),
+    narrated: Boolean(s.narration),
+  }));
   const h = createHash('sha1');
   h.update(
     JSON.stringify({
@@ -206,6 +213,24 @@ function renderInfo() {
   };
 }
 
+// Re-apply the shot list's editorial fields onto a cached timeline. Timing
+// (start/contentStart/end/step) is whatever the real render measured and must
+// survive; sfx/narration/caption are cheap to change and must not go stale.
+function refreshEditorial(timeline) {
+  const src = editorial?.[format]?.shots;
+  if (!Array.isArray(src)) return timeline;
+  return timeline.map((t, i) => {
+    const sh = src[t.shot ?? i];
+    if (!sh) return t;
+    return {
+      ...t,
+      sfx: sh.sfx ?? null,
+      narration: sh.narration ?? null,
+      caption: sh.caption ?? null,
+    };
+  });
+}
+
 // A cache hit skips frame capture entirely and goes straight to the burn + mix.
 if (
   !flag('force-frames') &&
@@ -216,6 +241,11 @@ if (
   readIf(masterHashPath).trim() === inputsHash
 ) {
   const info = JSON.parse(readFileSync(renderInfoPath, 'utf8'));
+  // Persist the refreshed timeline as well as using it: the file is the record
+  // of what this render actually mixed, and verify/postkit/review tooling reads
+  // it. Leaving a stale copy on disk makes a correct mix look wrong.
+  const cachedTimeline = refreshEditorial(JSON.parse(readFileSync(timelinePath, 'utf8')));
+  writeFileSync(timelinePath, JSON.stringify(cachedTimeline, null, 2));
   console.log(
     `master: CACHED (${format}-master.mp4, ${info.videoDuration}s) — inputs unchanged, skipping ${info.shots} shots. --force-frames to re-render.`,
   );
@@ -227,7 +257,15 @@ if (
     videoDuration: info.videoDuration,
     audioDelay: info.audioDelay,
     continuous: info.continuous,
-    timeline: JSON.parse(readFileSync(timelinePath, 'utf8')),
+    // The cached timeline carries each shot's EDITORIAL fields (sfx cues,
+    // narration, caption) as well as its timing, and the mix reads its sfx from
+    // there. Those fields are deliberately NOT part of the master cache key -
+    // changing a sound effect should not re-render 1700 frames - but that means
+    // a cache hit would otherwise replay the sfx list captured on the last FULL
+    // render and silently ignore the edit. (Observed: a cue deleted from
+    // video.js kept firing at 36.1s through three "successful" re-renders.)
+    // Timing stays authoritative from disk; editorial is refreshed from source.
+    timeline: cachedTimeline,
     editorial,
     metaTitle,
     wantCaptions,
@@ -363,6 +401,73 @@ const LEAD_IN = 0.6; // silent beat over the hero before the voiceover starts
 const TAIL_PAD = 4.0;
 const frameMs = 1000 / fps;
 
+// --- camera moves ----------------------------------------------------------
+// Ported from render-film.mjs, which has had a moving camera since the first
+// film while every short shipped with a dead one. A move is expressed relative
+// to the pose the shot actually settled on (the solved auto-frame, or the
+// authored `camera`), so it survives a later retune of the step's own pose:
+//   push   distance multiplier reached by the END of the shot (<1 pushes in)
+//   orbit  degrees of azimuth travelled over the shot (parallax drift)
+//   rise   vertical offset in world units reached by the end of the shot
+//
+// RANGES ARE NARROW ON PURPOSE, and the numbers are the film's hard-won ones:
+// push 0.72 ended with the subject half out of frame. A move the viewer
+// consciously NOTICES is already too big — the frame should feel alive, not
+// the camera perform.
+const PUSH_MIN = 0.85;
+const PUSH_MAX = 1.22;
+const ORBIT_MAX = 25; // degrees over one shot; beyond this it reads as a spin
+const easeInOut = (q) => (q < 0.5 ? 2 * q * q : 1 - (-2 * q + 2) ** 2 / 2);
+
+function normalizeMoves() {
+  const clamp = (v, lo, hi, what, i) => {
+    if (v == null) return v;
+    const c = Math.max(lo, Math.min(hi, v));
+    if (c !== v) console.warn(`  shot ${i}: ${what} ${v} -> clamped to ${c} (beyond this the subject crops)`);
+    return c;
+  };
+  for (const [i, sh] of shots.entries()) {
+    sh.push = clamp(sh.push, PUSH_MIN, PUSH_MAX, 'push', i);
+    sh.orbit = clamp(sh.orbit, -ORBIT_MAX, ORBIT_MAX, 'orbit', i);
+  }
+}
+normalizeMoves();
+
+const hasMove = (sh) => sh.push != null || sh.orbit != null || sh.rise != null;
+
+// The pose the move departs from, sampled once the shot has settled.
+const captureBase = () =>
+  page.evaluate(() => {
+    const c = window.__hiw.stage.camera;
+    const t = window.__hiw.stage.controls.target;
+    return { p: [c.position.x, c.position.y, c.position.z], t: [t.x, t.y, t.z] };
+  });
+
+const applyMove = (base, sh, q) => {
+  const e = easeInOut(q);
+  const scale = 1 + ((sh.push ?? 1) - 1) * e;
+  const ang = (((sh.orbit ?? 0) * Math.PI) / 180) * e;
+  const dy = (sh.rise ?? 0) * e;
+  return page.evaluate(
+    ({ base, scale, ang, dy }) => {
+      const c = window.__hiw.stage.camera;
+      const [px, py, pz] = base.p;
+      const [tx, ty, tz] = base.t;
+      const vx = px - tx;
+      const vy = py - ty;
+      const vz = pz - tz;
+      // rotate the offset about world Y, then scale it — orbit, then dolly
+      const cs = Math.cos(ang);
+      const sn = Math.sin(ang);
+      const rx = vx * cs - vz * sn;
+      const rz = vx * sn + vz * cs;
+      c.position.set(tx + rx * scale, ty + (vy + dy) * scale, tz + rz * scale);
+      c.lookAt(tx, ty, tz);
+    },
+    { base, scale, ang, dy },
+  );
+};
+
 const audioDir = join(outRoot, 'audio');
 const timingsPath = join(audioDir, `${format}-timings.json`);
 const fullAudioPath = join(audioDir, `${format}-full.mp3`);
@@ -381,18 +486,102 @@ let audioDelay = 0; // when the continuous track starts on the video timeline
 if (continuous) {
   narr = JSON.parse(readFileSync(timingsPath, 'utf8'));
   audioDelay = LEAD_IN;
-  const lastIdx = shots.length - 1;
-  for (let i = 0; i < shots.length; i++) {
-    const startV = i === 0 ? 0 : LEAD_IN + (narr[i]?.start ?? narr[i - 1]?.end ?? 0);
-    const endV =
-      i === lastIdx
-        ? LEAD_IN + (narr[i]?.end ?? 0) + TAIL_PAD
-        : LEAD_IN + (narr[i + 1]?.start ?? narr[i]?.end ?? 0);
-    // floor so a very short beat still fits its fly-to + a moment of hold
-    shotDurations[i] = Math.max(FLY_SECONDS + 0.4, endV - startV);
+
+  // BEATS, not shots, are what the audio clock addresses. A beat is one spoken
+  // line: the shot carrying the `narration` plus every SILENT shot after it
+  // (no `narration` field). make-narration.mjs already keys its timings by the
+  // ORIGINAL shot index and skips silent shots, so a beat's span is simply
+  // [this narrated shot's start, the next narrated shot's start).
+  //
+  // Why this exists: shots used to be 1:1 with spoken lines, so the picture had
+  // to hold for a whole sentence — measured across 55 shipped shorts, a median
+  // of 8.8s per shot, where the format wants 2-3s. Splitting the beat lets one
+  // sentence carry three or four cuts.
+  //
+  // The split must fill the beat EXACTLY. The take is one continuous mp3
+  // dropped once at audioDelay, so any slack between the picture's accumulated
+  // length and the audio's own clock desyncs every shot after it.
+  // Which shots speak is read from the SHOT LIST, and the timings are matched
+  // POSITIONALLY (the Nth spoken shot takes the Nth timing entry) rather than by
+  // absolute shot index. That distinction is what makes cutting cheap: adding a
+  // silent cutaway shifts every later shot's index, so an index-keyed lookup
+  // would force a re-synthesis for a purely visual edit — costing an API call
+  // and, worse, a fresh take with different intonation on a script nobody
+  // changed. Positional matching lets the picture be re-cut against the take
+  // that is already on disk.
+  const narratedIdx = shots.map((_, i) => i).filter((i) => shots[i].narration);
+  const timingKeys = Object.keys(narr)
+    .map(Number)
+    .sort((a, b) => a - b);
+  if (!narratedIdx.length || !timingKeys.length) {
+    console.error('no narrated shots / no timing entries — re-run make-narration.mjs');
+    process.exit(1);
   }
+  if (narratedIdx.length !== timingKeys.length) {
+    console.error(
+      `${narratedIdx.length} narrated shots but ${timingKeys.length} timing entries — the script changed; re-run make-narration.mjs`,
+    );
+    process.exit(1);
+  }
+  if (narratedIdx[0] !== 0) {
+    console.error('shot 0 must carry narration (it opens the take); silent shots follow a spoken one');
+    process.exit(1);
+  }
+  // beat index -> its span in the take
+  const span = (b) => narr[timingKeys[b]];
+
+  const MIN_CUT = 0.6; // below this a cut reads as a glitch rather than an edit
+
+  // Divide one beat's span among its shots. An explicit `seconds` on a silent
+  // shot is a REQUEST, honoured in proportion — never absolutely, because the
+  // beat's total is owned by the narration, not the author.
+  const splitBeat = (span, beatShots) => {
+    const n = beatShots.length;
+    if (n === 1) return [span];
+    if (span / n < MIN_CUT) {
+      console.warn(
+        `  beat of ${n} shots has only ${span.toFixed(1)}s — cuts land under ${MIN_CUT}s; write fewer shots on this line`,
+      );
+      return Array(n).fill(span / n);
+    }
+    let w = beatShots.map((sh) => (typeof sh.seconds === 'number' && sh.seconds > 0 ? sh.seconds : 0));
+    const flex = w.filter((v) => v === 0).length;
+    if (flex) {
+      const fixedSum = w.reduce((a, b) => a + b, 0);
+      const each = Math.max(MIN_CUT, (span - fixedSum) / flex);
+      w = w.map((v) => (v === 0 ? each : v));
+    }
+    const sum = w.reduce((a, b) => a + b, 0);
+    const out = w.map((v) => (v * span) / sum);
+    // One floor pass, paid for by the longest shot in the beat.
+    for (let k = 0; k < out.length; k++) {
+      if (out[k] >= MIN_CUT) continue;
+      const j = out.indexOf(Math.max(...out));
+      const debt = MIN_CUT - out[k];
+      if (j === k || out[j] - debt < MIN_CUT) break;
+      out[j] -= debt;
+      out[k] = MIN_CUT;
+    }
+    return out;
+  };
+
+  for (let b = 0; b < narratedIdx.length; b++) {
+    const from = narratedIdx[b];
+    const to = b + 1 < narratedIdx.length ? narratedIdx[b + 1] : shots.length;
+    const isLast = b === narratedIdx.length - 1;
+    const startV = b === 0 ? 0 : LEAD_IN + span(b).start;
+    const endV = isLast ? LEAD_IN + span(b).end + TAIL_PAD : LEAD_IN + span(b + 1).start;
+    const parts = splitBeat(Math.max(MIN_CUT, endV - startV), shots.slice(from, to));
+    for (let k = 0; k < parts.length; k++) shotDurations[from + k] = parts[k];
+  }
+
   const total = LEAD_IN + Math.max(...Object.values(narr).map((t) => t.end)) + TAIL_PAD;
-  console.log(`pacing: audio-master single-take — ${shots.length} shots, ~${total.toFixed(1)}s`);
+  const cuts = shots.length - narratedIdx.length;
+  console.log(
+    `pacing: audio-master single-take — ${narratedIdx.length} beats / ${shots.length} shots` +
+      `${cuts ? ` (${cuts} silent cut${cuts > 1 ? 's' : ''})` : ''}, ~${total.toFixed(1)}s` +
+      `, avg shot ${(total / shots.length).toFixed(1)}s`,
+  );
 } else {
   for (const [si, shot] of shots.entries()) {
     let base = shot.seconds ?? 8;
@@ -427,8 +616,22 @@ const timeline = [];
 const framing = {}; // shot index -> the pose auto-framing solved, for the gate + storyboard
 const t0 = Date.now();
 
+// A shot FLIES into position when it opens a spoken line, and CUTS when it is
+// a silent shot riding inside one — spending 1.3s gliding into a 2s cutaway is
+// how the old pipeline turned every edit into drift. `move: 'cut' | 'fly'`
+// overrides per shot; shot 0 always flies, since it opens on the hero.
+const isNarrated = (i) => Boolean(shots[i].narration);
+const cutsIn = (i) => {
+  const m = shots[i].move;
+  if (m === 'cut') return true;
+  if (m === 'fly') return false;
+  return i !== 0 && !isNarrated(i);
+};
+
 for (const [si, shot] of shots.entries()) {
   const isFirst = si === 0;
+  const hardCut = cutsIn(si);
+  const flyMs = hardCut ? 0 : undefined; // undefined = player's own 1300ms
   // A shot with an explicit `camera` keeps its authored `dolly`; an auto-framed
   // one is pinned at 1 because the solver already put the distance where it
   // wants it (see baseDolly above).
@@ -452,7 +655,7 @@ for (const [si, shot] of shots.entries()) {
   // when activate() was a no-op (two shots sharing a step), same reasoning
   // as the labels override below.
   if (shot.camera) {
-    await page.evaluate((pose) => window.__hiw.flyTo(pose), shot.camera);
+    await page.evaluate((o) => window.__hiw.flyTo(o.pose, o.ms), { pose: shot.camera, ms: flyMs });
   }
 
   // Per-shot label targeting (OPT-IN via `labels: [...]` in video.js): show
@@ -501,7 +704,7 @@ for (const [si, shot] of shots.entries()) {
   if (autoFrame && !shot.camera) {
     const solved = await page.evaluate(
       (o) => window.__hiw.frameTo(o),
-      { keys: shot.frame, fill: shot.fill ?? baseFill, bias: shot.bias ?? baseBias },
+      { keys: shot.frame, fill: shot.fill ?? baseFill, bias: shot.bias ?? baseBias, ms: flyMs },
     );
     framing[si] = solved;
   }
@@ -520,7 +723,18 @@ for (const [si, shot] of shots.entries()) {
   // interactive site).
   const shotSpeed = shot.speed ?? 1;
 
+  // The move may only own the camera AFTER the fly-to has landed, or the two
+  // would write the same property at once (rule 5, applied to the camera). A
+  // hard cut has nothing in flight, so its move starts on frame 0.
+  const moving = hasMove(shot);
+  const moveFrom = hardCut ? 0 : Math.round(FLY_SECONDS * fps);
+  let moveBase = null;
+
   for (let f = 0; f < totalFrames; f++) {
+    if (moving && f === moveFrom) moveBase = await captureBase();
+    if (moveBase && f >= moveFrom) {
+      await applyMove(moveBase, shot, (f - moveFrom) / Math.max(1, totalFrames - moveFrom));
+    }
     await advance(frameMs * shotSpeed);
     // JPEG q98 (near-lossless) — ~3-4x faster to capture than PNG. At q98 the
     // dark-gradient posterizing is negligible, and the encode-time `gradfun`

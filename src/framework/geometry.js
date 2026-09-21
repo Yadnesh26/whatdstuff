@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { varyInstances } from './surface.js';
 
 // Realism-grade procedural geometry. The single biggest "this is CG" tell is a
 // mathematically sharp edge — everything here carries a bevel or a curve.
@@ -148,6 +149,10 @@ export function bladeRing(
     inst.setMatrixAt(i, m);
   }
   inst.instanceMatrix.needsUpdate = true;
+  // Decorrelate the blades: a per-instance roughness/tint jitter so a 24-blade
+  // ring doesn't read as one blade stamped 24 times. No-op when the material
+  // carries no maps (nothing to break up) — cheap either way.
+  if (material.map || material.roughnessMap || material.normalMap) varyInstances(inst);
   group.add(inst);
   if (hubDepth > 0) {
     const hub = new THREE.Mesh(

@@ -131,7 +131,7 @@ export function mountExplainer(def, container) {
   // a tween targeting the same object+properties rather than composing with
   // it) — lets export-video.mjs re-aim a shot's camera without duplicating
   // flyTo's dolly/frameForViewport logic
-  window.__hiw.flyTo = (pose) => flyTo(pose);
+  window.__hiw.flyTo = (pose, ms) => flyTo(pose, ms);
   // Auto-framing for video export: solve a pose that centres and fills the
   // frame with the named parts, fly to it, and refocus DoF at the distance
   // actually used. Returns the solved pose so the exporter can log and gate on
@@ -139,7 +139,8 @@ export function mountExplainer(def, container) {
   window.__hiw.frameSubject = (opts) => frameSubject(opts);
   window.__hiw.frameTo = (opts = {}) => {
     const pose = frameSubject(opts);
-    flyTo(pose);
+    // opts.ms === 0 cuts to the solved pose instead of flying to it.
+    flyTo(pose, opts.ms);
     applyDof(pose, opts.aperture);
     return pose;
   };
@@ -204,7 +205,13 @@ export function mountExplainer(def, container) {
     };
   }
 
-  function flyTo(pose) {
+  // `ms` overrides the move duration. Video export passes 0 for a HARD CUT —
+  // a fast cutaway inside one spoken line must not spend 1.3s gliding into
+  // position, and an eased move under a 2s shot reads as drift, not intent.
+  // A 0 snaps both camera and target in place; anything else animates exactly
+  // as the interactive site does. Never used on the live site (which always
+  // takes the default) — export-only, like frameSubject below.
+  function flyTo(pose, ms = 1300) {
     const { position, target } = frameForViewport(pose);
     // video export sets __hiwCameraScale > 1 for portrait renders: dolly the
     // camera out along the view axis so landscape-framed shots still fit.
@@ -212,14 +219,30 @@ export function mountExplainer(def, container) {
     // before boot's first fly-to runs.
     const s = window.__hiwCameraScale ?? 1;
     const p = s === 1 ? position : position.map((v, k) => target[k] + (v - target[k]) * s);
+    if (ms <= 0) {
+      // Snap. A bare assignment is NOT enough: activate() fires the step's own
+      // flyTo first, and that tween is still in flight — it would keep writing
+      // the camera on every later tick and drag the cut back into a glide. So
+      // claim the tween slot with a zero-duration animate() (anime.js REPLACES
+      // a tween targeting the same object+properties rather than composing with
+      // it — rule 5), then assign so the pose is correct on this very frame
+      // without waiting for a tick.
+      animate(stage.camera.position, { x: p[0], y: p[1], z: p[2], duration: 0 });
+      animate(stage.controls.target, {
+        x: target[0], y: target[1], z: target[2], duration: 0,
+      });
+      stage.camera.position.set(p[0], p[1], p[2]);
+      stage.controls.target.set(target[0], target[1], target[2]);
+      return;
+    }
     animate(stage.camera.position, {
       x: p[0], y: p[1], z: p[2],
-      duration: 1300,
+      duration: ms,
       ease: 'inOutQuad',
     });
     animate(stage.controls.target, {
       x: target[0], y: target[1], z: target[2],
-      duration: 1300,
+      duration: ms,
       ease: 'inOutQuad',
     });
   }

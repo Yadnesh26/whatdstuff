@@ -49,8 +49,10 @@ assets, ever.
 
 | Path | Role |
 | --- | --- |
-| src/main.js | path router: `/` library · `/<category>` · `/<id>` (falls back to legacy `#/<id>` hash for old links + tooling) |
+| src/main.js | path router: `/` library · `/about` · `/<category>` · `/<id>` (falls back to legacy `#/<id>` hash for old links + tooling) |
 | src/categories.js | category tree; explainers list theirs in meta.js |
+| src/chrome.js | shared page chrome: masthead, footer, credit gears, procedural surfaces (home + about) |
+| src/about.js, about-copy.js | the about page; copy lives in the pure data module so prerender.mjs renders the same words |
 | src/framework/registry.js | auto-globs explainer folders; eager meta.js, lazy index.js |
 | src/framework/player.js | step activation, camera fly-tos, panels, progress rail |
 | src/framework/stage.js | renderer, camera, studio HDRI + lights, GTAO/bloom/DoF, shadow floor |
