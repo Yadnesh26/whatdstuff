@@ -1,22 +1,46 @@
 // steps: 0 component · 1 silicon die · 2 two junctions · 3 injection
 //        4 current gain · 5 switch · 6 amplifier · 7 quietly
 export default {
-  hook: 'The tiny switch that\nbuilt the modern world.',
+  hook: 'This tiny part is a valve, a whisper controlling a flood.',
+
+  render: {
+    formats: ['short'],
+    captions: true,
+    captionStyle: 'bold-karaoke',
+    followOverlay: { short: true },
+  },
 
   short: {
     shots: [
-      { step: 0, seconds: 4, caption: 'A transistor: a valve for electricity',
-        narration: 'A transistor is an electric valve — a tiny knob where one small signal controls a much larger flow.' },
-      { step: 1, seconds: 5, caption: 'Inside: a sliver of silicon',
-        narration: 'Inside its case is a speck of silicon, deliberately layered into three regions.' },
-      { step: 2, seconds: 5, caption: 'Three layers, two junctions',
-        narration: 'Those three layers form two junctions. One is nudged open, the other held closed — the key to the trick.' },
-      { step: 3, seconds: 6, caption: 'A tiny base current opens the gate',
-        narration: 'A tiny current into the thin middle layer floods it, opening the gate for a huge current to pour through.' },
-      { step: 4, seconds: 5, caption: 'Small current controls large',
-        narration: 'A whisper at the base commands a flood at the output. That’s amplification, and switching.' },
-      { step: 5, seconds: 5, caption: 'Billions of them make a chip think',
-        narration: 'Pack billions onto a chip, flicking on and off, and you get a computer.' },
+      { step: 0, narration: 'This tiny part is a valve, a whisper of current controlling a flood.' },
+      { step: 0, frame: ['Emitter lead', 'Base lead', 'Collector lead'], seconds: 1 },
+      { step: 0, frame: ['Black epoxy package (TO-92)'], seconds: 1 },
+
+      { step: 1, narration: 'Crack that valve open and there’s almost nothing inside, just a fleck of silicon smaller than a grain of rice.' },
+      { step: 1, frame: ['Gold wire bonds'], seconds: 1 },
+      { step: 1, frame: null, seconds: 1 },
+
+      { step: 2, narration: 'So how does a fleck that tiny control a current a hundred times bigger?' },
+      { step: 2, frame: ['Base-emitter: forward biased (thin barrier)', 'Base-collector: reverse biased (wide barrier)'], fill: 0.6, seconds: 1.4 },
+      { step: 2, narration: 'That fleck is grown into three layers, and it forms two junctions where they meet.' },
+      { step: 2, narration: 'One of those junctions sits wide open, and the other stays shut tight.' },
+      { step: 2, frame: ['Base-collector: reverse biased (wide barrier)'], fill: 0.6, seconds: 1 },
+
+      { step: 3, narration: 'But push a tiny trickle of current into the thin layer between those junctions, and it floods with charge.' },
+      { step: 3, frame: ['Thin base: most carriers cross'], fill: 0.55, seconds: 1.2 },
+      { step: 3, narration: 'Most of that charge shoots straight through the junction that’s supposed to be closed.' },
+      { step: 3, frame: ['Swept into the collector'], fill: 0.65, seconds: 1 },
+
+      { step: 4, narration: 'So that’s current gain, a trickle in and a flood out, sometimes a hundred times bigger.' },
+      { step: 4, frame: ['Ib — the small controlling trickle'], fill: 0.45, seconds: 1 },
+      { step: 4, frame: ['Ic — the large controlled current'], fill: 0.45, seconds: 1.2 },
+
+      { step: 5, narration: 'Push that flood all the way and the valve just snaps, fully open or fully shut. That’s a one or a zero.' },
+      { step: 5, frame: null, fill: 0.75, seconds: 1.2 },
+      { step: 5, narration: 'Billions of these specks flipping open and shut like that, billions of times a second, is literally what a computer is.' },
+
+      { step: 7, frame: null, seconds: 0.8 },
+      { step: 7, narration: 'Still, just a whisper, controlling a flood inside every computer it powers.' },
     ],
   },
 

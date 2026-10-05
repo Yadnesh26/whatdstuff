@@ -39,10 +39,25 @@ const OUT = 'public/plates';
 // later step frames better WITHOUT changing the in-app camera, pin it here —
 // otherwise a plain `make-plates.mjs` run silently reverts the fix.
 const OVERRIDES = {
+  // step 1 is two small sealed chips pushed into the right third: on a card it
+  // reads as a pair of grey squares in dead space. Step 5 at 30% is the image
+  // this explainer is about: eight ARM decoders lit at once beside the x86
+  // ribbon finding its boundaries one by one, spanning the card.
+  'risc-vs-cisc': { step: 5, frac: 0.3 },
+  // step 1 is a sealed grey console in the right third — a featureless box on
+  // a panel-less card. Step 4's meaning space (clusters + king/queen arrows)
+  // is the explainer's image and stays inside the card.
+  nlp: { step: 4, frac: 0.6 },
   // step 1 is right, but the default mid-lap frac catches the head halfway
   // through its turn — window pointing away, so the card is a featureless
   // black can. frac 0.02 holds it just off zero, window square to camera.
   lidar: { frac: 0.02 },
+  // step 1 pushes the crust block into the right third for the text panel;
+  // step 4's section cut fills the card and shows the P and S rings mid-flight.
+  earthquake: { step: 4, frac: 0.2 },
+  // step 1 is a plain globe in the right third — reads as any planet. Step 2's
+  // octant  (true-scale layers, glowing core) is the explainer's image.
+  'inside-the-earth': { step: 2 },
   // step 1 is the shop counter pushed into the right-hand third for the text
   // panel, so on a panel-less card the left half is dead black and the three
   // little objects shrink to nothing. Step 2 is the image this explainer is
@@ -55,12 +70,22 @@ const OVERRIDES = {
   // stacks over the lit shear line — the one frame that says "inside a lock"
   // at thumbnail size.
   'pin-tumbler-lock': { step: 3, frac: 0.55 },
+  // step 1 is the whole 13-unit table pushed right for the panel: on a card it
+  // is a thin strip in dead space. Step 4 is the explainer's image: the index
+  // wall with the bees + honey lines lit and their matches glowing, the web of
+  // pages filling the left of the card.
+  'google-search': { step: 4, frac: 0.6 },
   // step 1 is framed for the app: pushed hard right AND dropped down the frame
   // so the hero title clears it, which on a panel-less card leaves the whole
   // upper-left empty. Step 6 is the same complete system from a wider, flatter
   // camera with no drop — Sun, all eight orbits, Saturn's rings legible at card
   // size.
   'solar-system': { step: 6 },
+  // step 1 pushes the whole rig into the right two-thirds for the panel, so
+  // the card is half empty and the rack is a thin line between two tyres.
+  // Step 5 is the idea itself: the magnified valve slice mid-twist (one set of
+  // grooves glowing with pressure) above the pinion tower and toothed rack.
+  'power-steering': { step: 5, frac: 0.15 },
   // step 1 frames the rig in the right-hand third for the app's text panel, so
   // on a panel-less card the left half is dead black and the column shrinks to a
   // sliver. Step 4 is the same rig with the time-rate lattice lit: the stacked
