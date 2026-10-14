@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>whatDstuff · intro post</title>
+<!--
+  Instagram intro post, 2 slides, 1080x1350 (4:5). A DETERMINISTIC page: nothing
+  here runs on its own clock. render.mjs calls window.setup(slide) once and then
+  window.draw(t) for every frame, so a render is reproducible from the repo.
+
+  Design language comes straight from src/style.css: polymer ground, brushed
+  aluminium text, heat-blued steel as the one accent, Archivo at wdth 70 / wght
+  800 for display, JetBrains Mono for labels, and the home hero's device —
+  line one is the DRAWING (stroked outline), the last line is the machined PART
+  (solid sheen). Drawing in, machine out.
+-->
+<style>
+  @font-face {
+    font-family: 'ArchivoV';
+    src: url('../../node_modules/@fontsource-variable/archivo/files/archivo-latin-wdth-normal.woff2') format('woff2');
+    font-weight: 100 900;
+    font-stretch: 62% 125%;
+  }
+  @font-face {
+    font-family: 'JBM';
+    src: url('../../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2') format('woff2');
+    font-weight: 100 800;
+  }
+  :root {
+    --polymer: #0e1014;
+    --polymer-2: #1b1f25;
+    --rubber: #08090b;
+    --alu: #ccd3db;
+    --steel-t: #dde3ea;
+    --chrome: #f2f5f8;
+    --alu-dim: #a2abb5;
+    --alu-faint: #79828d;
+    --gold: #e2b04a;
+    --straw: #d7b56a;
+    --sheen: linear-gradient(96deg, #ffffff 0%, #eef1f5 20%, #bcc4cd 50%, #ffffff 74%, #aeb7c0 100%);
+    --chamfer: inset 0 1px 0 rgba(216, 221, 227, 0.16), inset 0 -1px 0 rgba(0, 0, 0, 0.62);
+    --line-alu: rgba(198, 204, 212, 0.13);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1350px; background: var(--polymer); overflow: hidden; }
+  body { font-family: 'ArchivoV', 'Segoe UI', sans-serif; color: var(--steel-t); }
+  #stage {
+    position: relative; width: 1080px; height: 1350px; overflow: hidden;
+    background:
+      radial-gradient(90% 60% at 78% 22%, rgba(60, 70, 88, 0.34) 0%, rgba(14, 16, 20, 0) 62%),
+      radial-gradient(120% 80% at 20% 100%, rgba(226, 176, 74, 0.07) 0%, rgba(14, 16, 20, 0) 55%),
+      linear-gradient(180deg, #11141a 0%, #0e1014 55%, #0a0b0f 100%);
+  }
+  /* the film grain the site lays over the player, frozen per frame */
+  #grain {
+    position: absolute; inset: -80px; z-index: 90; pointer-events: none; opacity: 0.05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .abs { position: absolute; }
+  .mono {
+    font-family: 'JBM', ui-monospace, monospace; font-weight: 500;
+    letter-spacing: 0.2em; text-transform: uppercase;
+  }
+
+  /* ---- chrome: wordmark, index, footer ---- */
+  .wordmark { left: 64px; top: 50px; font-size: 40px; font-weight: 800; letter-spacing: -0.02em; font-variation-settings: 'wdth' 100; color: var(--chrome); line-height: 1; }
+  .wordmark b { color: var(--gold); font-weight: 800; }
+  .index { right: 64px; top: 60px; font-size: 18px; color: var(--alu-faint); }
+  .index i { font-style: normal; color: var(--alu); }
+  .foot-l { left: 64px; bottom: 44px; font-size: 17px; color: var(--alu-faint); }
+  .foot-r { right: 64px; bottom: 44px; font-size: 17px; color: var(--alu-dim); }
+  .eyebrow { z-index: 5; left: 64px; top: 142px; font-size: 20px; color: var(--alu-dim); display: flex; align-items: center; gap: 14px; white-space: nowrap; }
+  .eyebrow .tick { width: 10px; height: 10px; background: var(--gold); box-shadow: 0 0 14px rgba(226, 176, 74, 0.7); }
+  .eyebrow .rule { height: 2px; width: 0; background: linear-gradient(90deg, #e8ecf0, #9aa3ad 55%, transparent); }
+
+  /* ---- display type: drawing → part ---- */
+  .hl { left: 64px; right: 64px; }
+  .ln { display: block; overflow: hidden; padding-block: 0.07em; margin-block: -0.07em; }
+  .ln > i {
+    display: block; font-style: normal; white-space: nowrap; text-transform: uppercase;
+    font-variation-settings: 'wdth' 70, 'wght' 800; line-height: 0.86; letter-spacing: -0.02em; word-spacing: 0.1em;
+  }
+  .ln.draw > i { color: transparent; -webkit-text-stroke: 2.4px rgba(204, 211, 219, 0.88); }
+  .ln.part > i {
+    background: var(--sheen); -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.4));
+  }
+
+  /* ---- slide 1: the card ---- */
+  #card {
+    left: 90px; top: 226px; width: 900px; height: 600px; border-radius: 20px; overflow: hidden;
+    box-shadow: 0 50px 90px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(198, 204, 212, 0.14);
+    transform-origin: 50% 60%;
+  }
+  #page { position: absolute; inset: 0; background: linear-gradient(160deg, #e1e6ec 0%, #cfd5dc 100%); color: #2b2f36; font-family: Georgia, 'Times New Roman', serif; }
+  #page .hd { position: absolute; left: 56px; top: 36px; font: 600 13px 'JBM', monospace; letter-spacing: 0.16em; color: #707886; text-transform: uppercase; }
+  #page .pg { position: absolute; right: 56px; top: 36px; font: 600 13px 'JBM', monospace; letter-spacing: 0.16em; color: #707886; }
+  #page .tt { position: absolute; left: 56px; top: 62px; font-size: 29px; font-weight: 700; color: #262a31; white-space: nowrap; }
+  #page .tt span { font-weight: 400; font-style: italic; color: #5a6270; }
+  #page svg { position: absolute; left: 46px; top: 124px; width: 390px; height: 410px; overflow: visible; }
+  #page svg .st { fill: none; stroke: #2b2f36; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  #page svg text { font: italic 16px Georgia, serif; fill: #343a43; }
+  #lines { position: absolute; left: 474px; top: 128px; width: 380px; font-size: 15.5px; line-height: 23px; color: #343a43; }
+  #lines div { white-space: nowrap; height: 23px; }
+  #lines .h { font-weight: 700; margin-top: 12px; color: #262a31; }
+  #page .kt { position: absolute; left: 56px; bottom: 28px; font: 500 12px 'JBM', monospace; letter-spacing: 0.16em; color: #7b8391; text-transform: uppercase; }
+  #foot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
+  #tag {
+    position: absolute; left: 24px; bottom: 24px; padding: 9px 14px 9px 12px; border-radius: 999px;
+    background: rgba(14, 16, 20, 0.74); border: 1px solid var(--line-alu); font-size: 15px; color: var(--alu);
+    display: flex; align-items: center; gap: 10px; opacity: 0; box-shadow: var(--chamfer);
+  }
+  #tag i { width: 9px; height: 9px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 10px rgba(226, 176, 74, 0.9); }
+  #cap { left: 90px; top: 858px; height: 44px; font-size: 29px; letter-spacing: 0.04em; text-transform: none; color: var(--steel-t); white-space: nowrap; }
+  #cap .ar { color: var(--alu-faint); }
+  #cap .am { color: var(--gold); }
+  #cap .caret { display: inline-block; width: 0.55em; height: 1em; vertical-align: -0.12em; background: var(--alu); margin-left: 3px; }
+  #h1 { top: 944px; }
+
+  /* ---- slide 2: the wall ---- */
+  #wall { position: absolute; inset: 0; -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent 170px, #000 260px, #000 610px, transparent 840px); mask-image: linear-gradient(to bottom, transparent 0, transparent 170px, #000 260px, #000 610px, transparent 840px); }
+  .tile {
+    position: absolute; width: 336px; height: 448px; border-radius: 16px; overflow: hidden; background: var(--rubber);
+    box-shadow: 0 24px 50px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(198, 204, 212, 0.13), var(--chamfer);
+  }
+  .tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tile .lb {
+    position: absolute; left: 14px; bottom: 14px; padding: 7px 12px 7px 10px; border-radius: 999px;
+    background: rgba(14, 16, 20, 0.74); border: 1px solid var(--line-alu); font-size: 13px; color: var(--alu);
+    display: flex; align-items: center; gap: 8px; letter-spacing: 0.14em; white-space: nowrap;
+  }
+  .tile .lb i { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); }
+  #big { left: 64px; top: 838px; display: flex; align-items: flex-end; gap: 28px; }
+  #num {
+    font-size: 214px; line-height: 0.8; font-weight: 800; font-variation-settings: 'wdth' 70, 'wght' 800; letter-spacing: -0.03em;
+    background: var(--sheen); -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.45)); white-space: nowrap; display: flex;
+  }
+  #num .plus { display: inline-block; color: transparent; transform-origin: 50% 70%; }
+  #numlab { font-size: 21px; line-height: 1.55; color: var(--alu-dim); padding-bottom: 10px; }
+  #numlab b { color: var(--gold); font-weight: 500; }
+  #h2 { top: 1032px; }
+  #topics { left: 64px; top: 1218px; font-size: 20px; line-height: 1.7; letter-spacing: 0.1em; color: var(--alu-dim); }
+  #topics span { color: var(--gold); padding: 0 6px; }
+  #cta { inset: 0; }
+  #logo { left: 50%; top: 360px; height: 250px; margin-left: -91px; filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.5)); transform-origin: 50% 50%; }
+  #pick { left: 0; right: 0; top: 650px; text-align: center; }
+  #pick .ln > i { font-size: 190px; display: inline-block; }
+  #now { left: 0; right: 0; top: 872px; text-align: center; font-size: 28px; letter-spacing: 0.34em; color: var(--gold); }
+  #pill {
+    left: 50%; top: 950px; transform-origin: 50% 50%; padding: 22px 44px; border-radius: 999px; font-size: 38px; letter-spacing: 0.06em; text-transform: none;
+    color: var(--chrome); background: rgba(27, 31, 37, 0.85); border: 1.5px solid rgba(226, 176, 74, 0.7);
+    box-shadow: var(--chamfer), 0 0 40px rgba(226, 176, 74, 0.18); white-space: nowrap;
+  }
+  #pill b { color: var(--gold); font-weight: 600; }
+  #how { left: 0; right: 0; top: 1066px; text-align: center; font-size: 20px; line-height: 1.75; letter-spacing: 0.1em; color: var(--alu-dim); }
+</style>
+</head>
+<body>
+<div id="stage"><div id="grain"></div></div>
+<script>
+const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h.trim(); return d.firstChild; };
+const stage = document.getElementById('stage');
+const grain = document.getElementById('grain');
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const sm = (x) => { x = clamp(x); return x * x * (3 - 2 * x); };
+const win = (t, a, b) => sm((t - a) / (b - a));
+const lin = (t, a, b) => clamp((t - a) / (b - a));
+const outC = (x) => 1 - Math.pow(1 - clamp(x), 3);
+const outB = (x) => { x = clamp(x); const c = 1.70158; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const CACHE = '../../renders/intro-post/cache';
+const pad = (n) => String(n).padStart(3, '0');
+const ready = [];
+const setSrc = (img, src) => { if (img.dataset.src === src) return; img.dataset.src = src; img.src = src; ready.push(img.decode().catch(() => {})); };
+
+// shrink a headline's lines until the widest fits the safe width, then share
+// that size so the drawing line and the part line read as one block
+function fitLines(block, start, max = 952) {
+  const is = [...block.querySelectorAll('i')];
+  let fs = start;
+  const widest = () => Math.max(...is.map((i) => { i.style.display = 'inline-block'; const w = i.getBoundingClientRect().width; i.style.display = ''; return w; }));
+  is.forEach((i) => (i.style.fontSize = fs + 'px'));
+  while (widest() > max && fs > 40) { fs -= 2; is.forEach((i) => (i.style.fontSize = fs + 'px')); }
+}
+
+// a line that rises out of its own slot, the way the site's hero lines do
+function lineUp(el, k) { el.firstChild.style.transform = `translateY(${(1 - outC(k)) * 108}%)`; }
+
+function chrome(slide) {
+  stage.append(
+    $(`<div class="abs wordmark">what<b>D</b>stuff</div>`),
+    $(`<div class="abs mono index"><i>0${slide}</i> / 02</div>`),
+  );
+  if (slide === 1) stage.append($(`<div class="abs mono foot-l">whatdstuff.com</div>`));
+}
+
+// ===========================================================================
+// SLIDE 1 — the page that never stuck, then the thing running
+// ===========================================================================
+const S1 = { dur: 9 };
+const LINES = [
+  'Heat always flows from warm to cold. A refrigerator',
+  'cheats by pumping it the other way: the refrigerant',
+  'boils at low pressure in the evaporator, absorbing',
+  'heat from the food compartment. The compressor then',
+  'raises its pressure and temperature, so the vapor',
+  'can shed that heat into the room through the',
+  'condenser. An expansion valve drops the pressure,',
+  'and the cycle begins again.',
+  { h: 'Review questions' },
+  '1. Define the term evaporator.',
+  '2. Why is the condenser warmer than the room?',
+  '3. State the role of the expansion valve.',
+];
+const QS = [
+  { s: 0.8, txt: 'how does a fridge make cold?' },
+  { s: 1.8, txt: 'how does a payment go through?' },
+  { s: 2.8, txt: 'what does a heart do each beat?' },
+];
+
+function setup1() {
+  chrome(1);
+  stage.append($(`<div class="abs mono foot-r" id="swipe">swipe →</div>`));
+  const eyebrow = $(`<div class="abs mono eyebrow"><span class="tick"></span><span>why whatDstuff exists</span><span class="rule"></span></div>`);
+  stage.append(eyebrow);
+  const card = $(`<div class="abs" id="card"></div>`);
+  const page = $(`<div id="page"></div>`);
+  page.innerHTML = `
+    <div class="hd">Chapter 4 · Physics of heat</div><div class="pg">p. 112</div>
+    <div class="tt"><span>Fig. 4.2</span>&nbsp; The refrigeration cycle</div>
+    <svg viewBox="0 0 390 410">
+      <defs><marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#2b2f36"/></marker></defs>
+      <g id="dg">
+        <path class="st" pathLength="1" d="M70 90 L70 60 L320 60 L320 140" marker-end="url(#ah)"/>
+        <path class="st" pathLength="1" d="M320 210 L320 340 L100 340 L70 340 L70 260" marker-end="url(#ah)"/>
+        <path class="st" pathLength="1" d="M70 120 L70 220"/>
+        <path class="st" pathLength="1" d="M120 60 l12 -18 l24 36 l24 -36 l24 36 l24 -36 l12 18"/>
+        <path class="st" pathLength="1" d="M120 340 l12 -18 l24 36 l24 -36 l24 36 l24 -36 l12 18"/>
+        <circle class="st" pathLength="1" cx="320" cy="175" r="36"/>
+        <path class="st" pathLength="1" d="M300 160 L340 190 M300 190 L340 160"/>
+        <path class="st" pathLength="1" d="M52 160 L88 160 L52 196 L88 196 Z"/>
+        <path class="st" pathLength="1" d="M150 392 L210 392" marker-end="url(#ah)"/>
+        <path class="st" pathLength="1" d="M150 12 L210 12" marker-end="url(#ah)" transform="translate(0,0)"/>
+      </g>
+      <g id="dl">
+        <text x="136" y="26" text-anchor="middle">Q out</text>
+        <text x="218" y="32">Condenser</text>
+        <text x="190" y="388">Q in</text>
+        <text x="215" y="400" dy="0"></text>
+        <text x="120" y="300">Evaporator</text>
+        <text x="262" y="232">Compressor</text>
+        <text x="4" y="230">Expansion</text>
+        <text x="4" y="248">valve</text>
+        <text x="338" y="130" font-style="normal" style="font-weight:700">1</text>
+        <text x="338" y="290" style="font-weight:700">2</text>
+        <text x="30" y="300" style="font-weight:700">3</text>
+        <text x="30" y="110" style="font-weight:700">4</text>
+      </g>
+    </svg>
+    <div id="lines"></div>
+    <div class="kt">Key terms: refrigerant · latent heat · compressor</div>`;
+  card.append(page);
+  const foot = document.createElement('img'); foot.id = 'foot'; card.append(foot);
+  card.append($(`<div id="tag" class="mono"><i></i><span>running · four-stroke engine</span></div>`));
+  stage.append(card);
+  const lines = page.querySelector('#lines');
+  LINES.forEach((l) => { const d = document.createElement('div'); if (l.h) { d.className = 'h'; d.textContent = l.h; } else d.textContent = l; lines.append(d); });
+
+  const cap = $(`<div class="abs mono" id="cap"></div>`); stage.append(cap);
+  const h1 = $(`<div class="abs hl" id="h1"><span class="ln draw"><i>Most of it never stuck.</i></span><span class="ln part" style="margin-top:14px"><i>Watch it work. It stays.</i></span></div>`);
+  stage.append(h1);
+  // fit both lines to one width
+  fitLines(h1, 124);
+  return { eyebrow, card, page, lines: [...lines.children], dg: page.querySelector('#dg'), dl: page.querySelector('#dl'), foot, tag: card.querySelector('#tag'), cap, h1, tt: page.querySelector('.tt'), hd: page.querySelector('.hd'), pg: page.querySelector('.pg'), kt: page.querySelector('.kt'), swipe: document.getElementById('swipe') };
+}
+
+function typed(txt, t, s, cps = 46) { const n = Math.floor(clamp((t - s) * cps, 0, txt.length)); return txt.slice(0, n); }
+
+function draw1(E, t, f) {
+  // eyebrow rule draws, then rests
+  E.eyebrow.querySelector('.rule').style.width = 300 * outC(lin(t, 0, 0.8)) + 'px';
+  // the page settles from a slight tilt into the morph's square
+  const morph = win(t, 4.05, 4.85);
+  const rot = -1.6 * (1 - morph);
+  const drift = 1 + 0.035 * win(t, 4.9, 9);
+  E.card.style.transform = `rotate(${rot}deg) scale(${drift})`;
+  // 1) the page is forgotten: lines clip away top-down, drawing retracts, labels fade
+  E.lines.forEach((el, i) => {
+    const p = win(t, 1.1 + i * 0.13, 1.9 + i * 0.13);
+    el.style.clipPath = `inset(0 ${p * 100}% 0 0)`;
+    el.style.opacity = 1 - 0.4 * p;
+  });
+  E.dg.querySelectorAll('path,circle').forEach((el, i) => { el.style.strokeDasharray = 1; el.style.strokeDashoffset = win(t, 1.5 + i * 0.12, 2.5 + i * 0.12); });
+  E.dg.querySelectorAll('path[marker-end]').forEach((el) => { el.style.opacity = 1 - win(t, 2.4, 3.0); });
+  E.dl.style.opacity = 1 - win(t, 1.9, 3.1);
+  E.kt.style.opacity = 1 - win(t, 2.6, 3.4);
+  E.hd.style.opacity = E.pg.style.opacity = 1 - win(t, 2.8, 3.6);
+  E.tt.style.opacity = 1 - win(t, 3.2, 4.0);
+  // 2) the morph: paper → the machine running
+  E.page.style.opacity = 1 - win(t, 4.05, 4.55);
+  const idx = clamp(Math.floor((t - 4.0) * 30) + 1, 1, 180);
+  setSrc(E.foot, `${CACHE}/card/${pad(idx)}.jpg`);
+  E.foot.style.opacity = win(t, 4.1, 4.7);
+  E.foot.style.transform = `scale(${1.06 - 0.06 * win(t, 4.05, 5.2)})`;
+  E.tag.style.opacity = win(t, 5.3, 5.8);
+  // 3) caption: questions typed one at a time, then the verdict, then the claim
+  let html = '';
+  for (const q of QS) {
+    if (t >= q.s && t < q.s + 1.0) {
+      const fade = 1 - lin(t, q.s + 0.9, q.s + 1.0);
+      html = `<span class="ar">→ </span><span style="opacity:${fade}">${typed(q.txt, t, q.s)}</span>${t < q.s + 0.65 ? '<span class="caret"></span>' : ''}`;
+    }
+  }
+  if (t >= 3.75 && t < 4.5) html = `<span class="ar">→ </span><span class="am" style="opacity:${1 - lin(t, 4.4, 4.5)}">${typed('most people only half know.', t, 3.75, 42)}</span>`;
+  if (t >= 5.05) html = `<span class="ar">→ </span><span>${typed('real 3D, built from the real science.', t, 5.05, 44)}</span>`;
+  E.cap.innerHTML = html;
+  // headline: the drawing is there from frame 0; the part rises in once the machine runs
+  const [l1, l2] = E.h1.querySelectorAll('.ln');
+  lineUp(l1, 1);
+  lineUp(l2, lin(t, 4.6, 5.5));
+  E.swipe.style.opacity = 0.55 + 0.45 * Math.sin(t * 5);
+  E.swipe.style.transform = `translateX(${Math.max(0, Math.sin(t * 5)) * 6}px)`;
+}
+
+// ===========================================================================
+// SLIDE 2 — the wall of machines, the count, the invitation
+// ===========================================================================
+const S2 = { dur: 10 };
+const TILES = [
+  { id: 'four-stroke-engine', name: 'four-stroke engine', col: 0, row: 0 },
+  { id: 'jet-engine', name: 'jet engine', col: 1, row: 0 },
+  { id: 'black-hole', name: 'black hole', col: 2, row: 0 },
+  { id: 'mechanical-watch', name: 'mechanical watch', col: 0, row: 1 },
+  { id: 'mri-machine', name: 'mri machine', col: 1, row: 1 },
+  { id: 'nlp', name: 'language ai', col: 2, row: 1 },
+  { id: 'rocket-engine', name: 'rocket engine', col: 0, row: 2 },
+  { id: 'wind-turbine', name: 'wind turbine', col: 1, row: 2 },
+  { id: 'google-search', name: 'google search', col: 2, row: 2 },
+];
+const COLX = [12, 372, 732];
+const PITCH = 472;
+const COL0 = [200, 90, 170]; // starting y of each column
+const COLDIR = [-1, 1, -1];
+
+function setup2() {
+  chrome(2);
+  const eyebrow = $(`<div class="abs mono eyebrow"><span class="tick"></span><span>what we make</span><span class="rule"></span></div>`);
+  stage.append(eyebrow);
+  const wall = $(`<div id="wall"></div>`);
+  const tiles = TILES.map((tl) => {
+    const el = $(`<div class="tile"><img alt=""/><div class="lb mono"><i></i><span>${tl.name}</span></div></div>`);
+    wall.append(el);
+    return { ...tl, el, img: el.querySelector('img') };
+  });
+  stage.append(wall);
+
+  const big = $(`<div class="abs" id="big"><div id="num"><span id="n">0</span><span class="plus">+</span></div><div id="numlab" class="mono">explainers<br><b>and counting</b></div></div>`);
+  stage.append(big);
+  const h2 = $(`<div class="abs hl" id="h2"><span class="ln draw"><i>Built from scratch,</i></span><span class="ln part" style="margin-top:12px"><i>from the real science.</i></span></div>`);
+  stage.append(h2);
+  fitLines(h2, 92);
+  const topics = $(`<div class="abs mono" id="topics"><div>engines<span>·</span>the human body<span>·</span>cyclones</div><div>black holes<span>·</span>the internet<span>·</span>ai</div></div>`);
+  stage.append(topics);
+
+  const cta = $(`<div class="abs" id="cta"></div>`);
+  const logo = document.createElement('img'); logo.id = 'logo'; logo.className = 'abs'; logo.src = `${CACHE}/logo.png`; ready.push(logo.decode().catch(() => {}));
+  cta.append(logo);
+  cta.append($(`<div class="abs" id="pick"><span class="ln part"><i>Pick one.</i></span></div>`));
+  cta.append($(`<div class="abs mono" id="now">now you know.</div>`));
+  cta.append($(`<div class="abs mono" id="pill"><b>↗</b>&nbsp; whatdstuff.com</div>`));
+  cta.append($(`<div class="abs mono" id="how">on instagram, the short version.<br>on the site, scroll it, spin it, play with it.</div>`));
+  stage.append(cta);
+  const pill = cta.querySelector('#pill'); pill.style.marginLeft = '0px';
+  return { eyebrow, wall, tiles, big, num: big.querySelector('#n'), plus: big.querySelector('.plus'), numlab: big.querySelector('#numlab'), h2, topics, cta, logo, pick: cta.querySelector('#pick'), now: cta.querySelector('#now'), pill, how: cta.querySelector('#how') };
+}
+
+function draw2(E, t, f) {
+  E.eyebrow.querySelector('.rule').style.width = 300 * outC(lin(t, 0, 0.8)) + 'px';
+  // wall: three columns drifting in opposite directions, tiles staggering in
+  const idx = clamp(Math.floor(t * 30) + 1, 1, 300);
+  E.tiles.forEach((tl, i) => {
+    const y = COL0[tl.col] + tl.row * PITCH + COLDIR[tl.col] * 16 * t;
+    const k = outB(lin(t, 0.15 + i * 0.09, 0.95 + i * 0.09));
+    tl.el.style.left = COLX[tl.col] + 'px';
+    tl.el.style.top = y + 'px';
+    tl.el.style.opacity = clamp(k * 1.4);
+    tl.el.style.transform = `translateY(${(1 - k) * 60}px) scale(${0.94 + 0.06 * k})`;
+    setSrc(tl.img, `${CACHE}/${tl.id}/${pad(idx)}.jpg`);
+  });
+  // phase B: the wall steps back for the invitation
+  const back = win(t, 6.3, 7.1);
+  E.wall.style.opacity = 1 - 0.74 * back;
+  E.wall.style.filter = back > 0.001 ? `blur(${back * 9}px)` : 'none';
+  // the count
+  const cn = Math.round(90 * (1 - Math.pow(1 - lin(t, 0.9, 2.3), 2)));
+  E.num.textContent = String(cn);
+  const pk = outB(lin(t, 2.3, 2.75));
+  E.plus.style.transform = `scale(${pk})`;
+  E.plus.style.opacity = lin(t, 2.3, 2.45);
+  E.plus.style.background = 'var(--sheen)'; E.plus.style.webkitBackgroundClip = 'text'; E.plus.style.backgroundClip = 'text';
+  E.big.style.opacity = win(t, 0.85, 1.2);
+  E.numlab.style.opacity = win(t, 1.4, 2.0);
+  const [a, b] = E.h2.querySelectorAll('.ln');
+  lineUp(a, lin(t, 2.0, 2.9));
+  lineUp(b, lin(t, 2.5, 3.4));
+  const [t1, t2] = E.topics.children;
+  t1.style.opacity = win(t, 3.3, 3.9); t2.style.opacity = win(t, 3.6, 4.2);
+  // leaving phase A
+  const out = win(t, 6.0, 6.6);
+  [E.big, E.h2, E.topics].forEach((el) => { el.style.transform = `translateY(${-24 * out}px)`; });
+  E.big.style.opacity = win(t, 0.85, 1.2) * (1 - out);
+  E.h2.style.opacity = 1 - out; E.topics.style.opacity = (1 - out);
+  t1.style.opacity = win(t, 3.3, 3.9); t2.style.opacity = win(t, 3.6, 4.2);
+  // phase C: the invitation
+  E.cta.style.display = t > 6.4 ? 'block' : 'none';
+  const lg = outB(lin(t, 6.6, 7.3));
+  E.logo.style.opacity = clamp(lg * 1.5);
+  E.logo.style.transform = `scale(${0.7 + 0.3 * lg}) rotate(${(1 - lg) * -18}deg)`;
+  lineUp(E.pick.querySelector('.ln'), lin(t, 6.9, 7.7));
+  E.now.style.opacity = win(t, 7.7, 8.3);
+  E.now.style.letterSpacing = (0.52 - 0.18 * outC(lin(t, 7.7, 8.5))) + 'em';
+  const pp = outB(lin(t, 8.1, 8.7));
+  E.pill.style.opacity = clamp(pp * 1.5);
+  E.pill.style.transform = `translateX(-50%) scale(${0.85 + 0.15 * pp})`;
+  E.how.style.opacity = win(t, 8.5, 9.1);
+}
+
+// ===========================================================================
+let cur = null, E = null;
+window.setup = async (slide) => {
+  // headline fitting measures real glyph widths, so the faces must be loaded first
+  await Promise.all([document.fonts.load("800 100px ArchivoV"), document.fonts.load("500 20px JBM"), document.fonts.load("600 15px Georgia")]);
+  [...stage.children].forEach((c) => c !== grain && c.remove());
+  ready.length = 0;
+  cur = slide;
+  E = slide === 1 ? setup1() : setup2();
+  return slide === 1 ? S1.dur : S2.dur;
+};
+// A still is its own composition, not a paused frame: slide 1 at its finished
+// state, slide 2 with the wall, the count and the invitation all on at once.
+window.drawStatic = async () => {
+  if (cur === 1) {
+    draw1(E, 7.6, 0);
+    E.swipe.style.opacity = 0.9; E.swipe.style.transform = 'none';
+  } else {
+    draw2(E, 5.6, 0);
+    E.topics.style.display = 'none';
+    E.cta.style.display = 'block';
+    [E.logo, E.pick, E.how].forEach((el) => (el.style.display = 'none'));
+    E.big.style.top = '806px';
+    E.h2.style.top = '1000px';
+    Object.assign(E.pill.style, { left: '64px', top: '1212px', transform: 'none', opacity: 1, padding: '15px 34px', fontSize: '32px' });
+    Object.assign(E.now.style, { left: '0', right: '64px', top: '1232px', textAlign: 'right', opacity: 1, letterSpacing: '0.3em' });
+  }
+  await Promise.all(ready.splice(0));
+  await document.fonts.ready;
+};
+window.draw = async (t, frame = 0) => {
+  (cur === 1 ? draw1 : draw2)(E, t, frame);
+  grain.style.transform = `translate(${(frame % 3) * -3}px, ${((frame + 1) % 3) * 2}px)`;
+  await Promise.all(ready.splice(0));
+  await document.fonts.ready;
+};
+</script>
+</body>
+</html>

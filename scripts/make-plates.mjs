@@ -39,6 +39,10 @@ const OUT = 'public/plates';
 // later step frames better WITHOUT changing the in-app camera, pin it here —
 // otherwise a plain `make-plates.mjs` run silently reverts the fix.
 const OVERRIDES = {
+  // step 1 is a small globe in the right third, mostly Pacific from the plate's
+  // phase. Step 7 in August fills the card with the subcontinent: green India,
+  // the rain belt over it and the monsoon winds streaming in.
+  seasons: { step: 7, frac: 0.6 },
   // step 1 is two small sealed chips pushed into the right third: on a card it
   // reads as a pair of grey squares in dead space. Step 5 at 30% is the image
   // this explainer is about: eight ARM decoders lit at once beside the x86
@@ -48,6 +52,22 @@ const OVERRIDES = {
   // a panel-less card. Step 4's meaning space (clusters + king/queen arrows)
   // is the explainer's image and stays inside the card.
   nlp: { step: 4, frac: 0.6 },
+  // step 1 is a sealed charcoal box in the right third — dead space on a
+  // panel-less card. Step 4 (cover off, four scope screens over the board) is
+  // the whole AC → DC → AC chain in one frame.
+  'ac-dc-conversion': { step: 4, frac: 0.3 },
+  // step 1 is a lone red car in the right third with empty road to its left.
+  // Step 3 at 30% (second detection sweep, lines fully drawn) is the idea in
+  // one frame: the car under its camera's view cone, edge points and fitted
+  // lane lines glowing down the road.
+  'adas-lane-assist': { step: 3, frac: 0.3 },
+  // step 1 is a car seen from behind with empty road to its left. Step 3 is
+  // the explainer's own image: the sent and echo sawtooths with the bold
+  // pitch-gap arrow, the car ahead behind them.
+  'automatic-emergency-braking': { step: 3, frac: 0.3 },
+  // step 1 is a small rig in the left half of a panel-less card. Step 6 at 30%
+  // (the headform meeting a full bag that is already venting) is the idea in one frame.
+  airbag: { step: 6, frac: 0.3 },
   // step 1 is right, but the default mid-lap frac catches the head halfway
   // through its turn — window pointing away, so the card is a featureless
   // black can. frac 0.02 holds it just off zero, window square to camera.
@@ -170,6 +190,10 @@ const OVERRIDES = {
   // the close pass over the district: buildings, park and the expressway X
   // filling the frame, which is what the card needs to say "3D city map".
   'google-maps': { step: 2, frac: 0.55 },
+  // step 1 is a plain amber bottle in the right third — on a panel-less card it
+  // could be any bottle. Step 2 at 10% is the cut-in-half pump mid-press: spring,
+  // both balls, soap running up the stem and the dose swelling on the nozzle.
+  'soap-dispenser': { step: 2, frac: 0.1 },
 };
 
 mkdirSync(OUT, { recursive: true });

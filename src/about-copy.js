@@ -13,29 +13,29 @@ export const about = {
   // Two lines: the first is plain (the honest, human reason), the second
   // gets the home hero's "machine out" sheen treatment (see .about-hero h1
   // em in style.css) — the craft position stated as a fact, not a slogan.
-  heroLines: ['We wanted to see inside things.', 'So we started building them.'],
+  heroLines: ['You learn by watching things happen.', 'So that’s what we build.'],
   deck:
-    'whatDstuff is two people who got tired of diagrams that freeze the one ' +
-    'instant everything has already stopped moving. Every machine here is ' +
-    'built from scratch and left running while you look at it — scrolling ' +
-    'through one is the closest thing to actually taking it apart.',
+    'Most of what we’re taught about how the world works comes as a ' +
+    'paragraph and a diagram with arrows. whatDstuff builds every explainer ' +
+    'from scratch in interactive 3D, from the real science, and leaves it ' +
+    'running while you look.',
 
   intro: [
-    'You already know these machines by feel: the fridge’s hum, the click a ' +
-      'pen makes, the shudder a washing machine works itself into right ' +
-      'before it spins. Almost nobody has seen what’s actually happening ' +
-      'inside.',
-    'A cutaway photo won’t show you either — it’s frozen at the one moment ' +
-      'everything already stopped. So each explainer here is a small machine ' +
-      'of its own: built part by part from how the real thing works, running ' +
-      'the whole time you’re on the page, ready to be dragged around and ' +
-      'looked at from any angle.',
+    'Ask anyone how their fridge makes cold, how a payment goes through, or ' +
+      'what a heart does with each beat. Most people only half know. We were ' +
+      'taught from words: a paragraph, a definition, a diagram with arrows. ' +
+      'It rarely sticks, because that’s not how people learn.',
+    'We learn by watching something work, one step at a time. So every ' +
+      'explainer here is built from scratch in 3D, from the real science and ' +
+      'checked step by step. Scroll through it, spin it around, and watch it ' +
+      'run for as long as you like. No memorising and no jargon. Just the ' +
+      'thing itself, working in front of you, until you get it.',
   ],
 
   // A glanceable proof strip. `${count}` is swapped for the live explainer
   // count by both about.js and prerender.mjs, so it can never go stale.
   stats: [
-    { value: '${count}', label: 'machines built', note: 'and counting' },
+    { value: '${count}', label: 'explainers built', note: 'and counting' },
     { value: '0', label: 'parts imported', note: 'every gear tooth is math' },
     { value: '2', label: 'people building this', note: 'meet them in the gears, below ↓' },
   ],
@@ -108,13 +108,13 @@ export const about = {
     },
   ],
 
-  ctaHeading: 'Go open one',
-  // `${count}` is filled in with the real number of machines.
+  ctaHeading: 'Pick one.',
+  // `${count}` is filled in with the real number of explainers.
   ctaBody:
-    'There are ${count} machines on the bench right now, and the list is ' +
-    'only that short because nobody has asked for the rest yet. Search for ' +
-    'the one you want even if it isn’t there. A search that comes up empty ' +
-    'gets logged, and that log is what we build next.',
+    '${count} explainers and counting: engines, the human body, cyclones, ' +
+    'black holes, the internet, AI. Search for the one you want even if it ' +
+    'isn’t there. A search that comes up empty gets logged, and that log is ' +
+    'what we build next. Now you know.',
   ctaLabel: 'Open the library',
 };
 

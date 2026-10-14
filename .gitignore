@@ -31,20 +31,21 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Vite output
+# Vite output (dist/ also holds prerender.mjs pages + sitemap.xml)
 dist/
 dist-ssr/
+.vite/
 *.local
 
-# Local machine settings (shared .claude/settings.json stays tracked)
+# Claude Code — local settings + agent worktrees (shared .claude/settings.json,
+# agents/ and skills/ stay tracked)
 .claude/settings.local.json
+.claude/worktrees/
 
-# Env files
+# Env files — .env holds TTS / ElevenLabs API keys (CLAUDE.md rule 10)
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
 
 # Playwright
 test-results/
@@ -52,21 +53,26 @@ playwright-report/
 blob-report/
 playwright/.cache/
 
-# Project specific — generated capture / render output
-review-shots/
-scratch-shots/
-scratch-frames/
-.review/
-renders/
-renders-smoke/
+# Generated capture / render output
+# renders/ receives every export: export-video, render-film, make-narration,
+# make-film-narration, make-thumbnails, make-postkit, storyboard, social posts
+/review-shots/
+/scratch-shots/
+/scratch-frames/
+/.review/
+/renders/
+/renders-smoke/
 
-# Reference material + archives (not source)
-logo/
-mixer/
+# Reference material + archives (not source). Root-anchored so the tracked
+# assets/logo/ (used by social/intro-post/prep.mjs) is not swept up.
+/logo/
+/mixer/
+/overlay assets/
 *.7z
 *.zip
-overlay assets/
+
 # Ad-hoc Playwright probes (CLAUDE.md: name them *.tmp.mjs, delete when done)
 scripts/*.tmp.mjs
 
+# Discarded sfx take
 assets/sfx/breaker-slam.mp3
