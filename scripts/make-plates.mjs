@@ -43,6 +43,10 @@ const OVERRIDES = {
   // phase. Step 7 in August fills the card with the subcontinent: green India,
   // the rain belt over it and the monsoon winds streaming in.
   seasons: { step: 7, frac: 0.6 },
+  // step 1 is a thin open-frame printer in the right third with a tall spool,
+  // mostly dead space on a card. Step 5's nozzle-tip macro (glowing bead,
+  // stacked bead cross-sections) spans the card and is the explainer's image.
+  '3d-printer': { step: 5, frac: 0.3 },
   // step 1 is two small sealed chips pushed into the right third: on a card it
   // reads as a pair of grey squares in dead space. Step 5 at 30% is the image
   // this explainer is about: eight ARM decoders lit at once beside the x86
@@ -56,6 +60,10 @@ const OVERRIDES = {
   // panel-less card. Step 4 (cover off, four scope screens over the board) is
   // the whole AC → DC → AC chain in one frame.
   'ac-dc-conversion': { step: 4, frac: 0.3 },
+  // step 1 is a small dark car in the right third with no smoke — dead space
+  // on a card. Step 7 has the whole idea in one frame: smoke over and under
+  // the car, warm/blue wings, and the three downforce arrows.
+  'race-car-downforce': { step: 7, frac: 0.3 },
   // step 1 is a lone red car in the right third with empty road to its left.
   // Step 3 at 30% (second detection sweep, lines fully drawn) is the idea in
   // one frame: the car under its camera's view cone, edge points and fitted

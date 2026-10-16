@@ -47,13 +47,14 @@ const EX = 0.15; // exit hole radius
 const FRONT_IN = 4.02; // inner face of the front cap
 
 const Y0 = 1.3; // axis height above floor
-const ZC = 1.65; // half separation in the compare step
+const ZC = 1.9; // half separation in the compare step
 const U0 = 0.04; // bullet starts moving
 const T_S = 0.06; // bullet crosses the muzzle: gas released
 const LIFE = 0.92; // gas lifetime as a lap fraction
 const BARREL_DUR = 0.02;
-const OUT_DUR = 0.05; // exit cap -> end of the visible flight
+
 const FLIGHT_END = 7.4;
+const OUT_DEFAULT = 0.05; // exit cap -> end of the visible flight
 const N_STAGE = 8;
 const P_STAGE = 1.5;
 
@@ -161,7 +162,7 @@ function makeGas(N, kind, seed) {
     mesh.setMatrixAt(i, _m);
   }
 
-  function update(u, gain, halfDim) {
+  function update(u, gain, halfDim, scale = 1) {
     for (let i = 0; i < N; i++) {
       const age = (((u - T_S - jit[i]) % 1) + 1) % 1;
       const a = age / LIFE;
@@ -189,8 +190,8 @@ function makeGas(N, kind, seed) {
       } else {
         const e = 1 - Math.pow(1 - clamp01(a * 1.7), 3);
         const rr = Math.pow(rho[i], 0.55);
-        const lenX = jet[i] ? 4.2 : 2.9;
-        const lat = jet[i] ? 0.45 : 1.55;
+        const lenX = (jet[i] ? 4.2 : 2.9) * scale;
+        const lat = (jet[i] ? 0.45 : 1.55) * scale;
         x = MUZZLE_X + 0.05 + dir[i * 3] * lenX * rr * e;
         y = dir[i * 3 + 1] * lat * rr * e + 0.5 * a * a;
         z = dir[i * 3 + 2] * lat * rr * e;
@@ -477,13 +478,13 @@ export function buildSilencer({ scene }) {
   labels.add('crack', A, 'Gas wisp', [CAN_X1 + 0.55, 0.12, 0], -40, 68);
 
   // pose ---------------------------------------------------------------------------
-  const state = { u: 0, cut: 0, can: 1, compare: 0, mach: 0, gas: 1, dcan: 0.05 };
+  const state = { u: 0, cut: 0, can: 1, compare: 0, mach: 0, gas: 1, dcan: 0.05, out: OUT_DEFAULT, burst: 1 };
 
   function bulletX(u) {
     if (u < U0) return -99;
     if (u < T_S) return HOST_X0 + 0.05 + (MUZZLE_X - HOST_X0 - 0.05) * ((u - U0) / BARREL_DUR);
     if (u < T_S + state.dcan) return MUZZLE_X + (CAN_X1 - MUZZLE_X) * ((u - T_S) / state.dcan);
-    return CAN_X1 + ((u - T_S - state.dcan) / OUT_DUR) * (FLIGHT_END - CAN_X1);
+    return CAN_X1 + ((u - T_S - state.dcan) / state.out) * (FLIGHT_END - CAN_X1);
   }
 
   function applyRig(rig, { canVis, gain, shockAmp, flashAmp, exitAt, cutOn, halfDim }) {
@@ -499,11 +500,11 @@ export function buildSilencer({ scene }) {
     }
     const bareOn = !canVis;
     rig.gasBare.mesh.visible = bareOn && gain > 0;
-    if (bareOn) rig.gasBare.update(u, gain, false);
+    if (bareOn) rig.gasBare.update(u, gain, false, state.burst);
 
     // shock shell (the bang) + flash
     const s = clamp01(age / 0.45);
-    const R = shockAmp * 3.0 * (1 - Math.pow(1 - s, 3)) + 0.05;
+    const R = shockAmp * 3.0 * state.burst * (1 - Math.pow(1 - s, 3)) + 0.05;
     rig.shock.position.set(exitAt, 0.0, 0);
     rig.shock.scale.set(R * 0.9, R * 0.7, R * 0.7);
     rig.shock.material.opacity = (s < 1 ? 0.2 * Math.pow(1 - s, 2) : 0) * Math.pow(shockAmp, 0.5) * (gain > 0 ? 1 : 0);
@@ -566,7 +567,7 @@ export function buildSilencer({ scene }) {
 
     // Mach wavelets: a sphere per point the bullet passed, growing at 1/M of its speed
     const xb = bulletX(u) > -50 ? bulletX(u) : -99;
-    const fadeAll = 1 - win(u, 0.55, 0.75);
+    const fadeAll = 1 - win(u, 0.8, 0.97);
     const mOn = state.mach > 0.001 && canVis;
     wavelets.forEach((w) => {
       const r = (xb - w.userData.xj) / MACH;
@@ -577,13 +578,13 @@ export function buildSilencer({ scene }) {
       w.visible = true;
       w.position.set(w.userData.xj, 0, 0);
       w.scale.setScalar(r);
-      w.material.opacity = 0.2 * state.mach * (1 - r / 1.4) * fadeAll;
+      w.material.opacity = 0.12 * state.mach * (1 - r / 1.4) * fadeAll;
     });
     const coneOn = mOn && xb > CAN_X1 + 0.05 && xb < FLIGHT_END;
     machCone.visible = coneOn;
     if (coneOn) {
       machCone.position.set(xb, 0, 0);
-      machCone.material.opacity = 0.09 * state.mach;
+      machCone.material.opacity = 0.04 * state.mach;
     }
   }
   apply();
